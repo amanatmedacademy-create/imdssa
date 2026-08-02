@@ -1,5 +1,6 @@
 import { AppWindow, Archive, Edit3, Plus, RotateCcw, Trash2, X } from 'lucide-react';
-import { FormEvent, useMemo, useState } from 'react';
+import { type FormEvent, useMemo, useState } from 'react';
+import { useAuth } from './core/auth';
 
 export type ProductStatus = 'Работает' | 'Деградация' | 'Настройка' | 'Отключён';
 
@@ -89,6 +90,8 @@ function StatusBadge({ value }: { value: ProductStatus }) {
 }
 
 export function ProductRegistryPage({ products, onChange }: { products: Product[]; onChange: (next: Product[]) => void }) {
+  const { can } = useAuth();
+  const canManage = can('products.manage');
   const [showArchived, setShowArchived] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyForm);
@@ -100,12 +103,14 @@ export function ProductRegistryPage({ products, onChange }: { products: Product[
   );
 
   const openCreate = () => {
+    if (!canManage) return;
     setEditing(null);
     setForm(emptyForm);
     setMessage('');
   };
 
   const openEdit = (product: Product) => {
+    if (!canManage) return;
     setEditing(product);
     setForm({
       name: product.name,
@@ -127,6 +132,7 @@ export function ProductRegistryPage({ products, onChange }: { products: Product[
   };
 
   const showDialog = (product?: Product) => {
+    if (!canManage) return;
     if (product) openEdit(product);
     else openCreate();
     const dialog = document.getElementById('product-dialog') as HTMLDialogElement | null;
@@ -135,6 +141,7 @@ export function ProductRegistryPage({ products, onChange }: { products: Product[
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (!canManage) return;
     const name = form.name.trim();
     const key = (form.key.trim() || slugify(name)).toLowerCase();
 
@@ -173,6 +180,7 @@ export function ProductRegistryPage({ products, onChange }: { products: Product[
   };
 
   const archive = (product: Product) => {
+    if (!canManage) return;
     if (product.tenants > 0) {
       window.alert(`Нельзя убрать ${product.name}: продукт подключён у ${product.tenants} компаний. Сначала отключите лицензии.`);
       return;
@@ -182,11 +190,12 @@ export function ProductRegistryPage({ products, onChange }: { products: Product[
   };
 
   const restore = (product: Product) => {
+    if (!canManage) return;
     onChange(products.map((item) => item.id === product.id ? { ...item, archivedAt: null, status: 'Настройка' } : item));
   };
 
   const removePermanently = (product: Product) => {
-    if (product.isSystem || product.tenants > 0 || !product.archivedAt) return;
+    if (!canManage || product.isSystem || product.tenants > 0 || !product.archivedAt) return;
     if (!window.confirm(`Удалить ${product.name} навсегда? Это действие нельзя отменить.`)) return;
     onChange(products.filter((item) => item.id !== product.id));
   };
@@ -204,9 +213,11 @@ export function ProductRegistryPage({ products, onChange }: { products: Product[
             <input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />
             <span>Показывать архив</span>
           </label>
-          <button className="primary-button" onClick={() => showDialog()}><Plus size={17} /> Добавить продукт</button>
+          {canManage && <button className="primary-button" onClick={() => showDialog()}><Plus size={17} /> Добавить продукт</button>}
         </div>
       </div>
+
+      {!canManage && <div className="mode-banner"><AppWindow size={18} /><div><strong>Режим просмотра</strong><span>Текущая роль может просматривать Product Registry, но не может менять продукты.</span></div></div>}
 
       <div className="registry-grid">
         {visibleProducts.map((product) => (
@@ -228,7 +239,7 @@ export function ProductRegistryPage({ products, onChange }: { products: Product[
               <div><dt>Версия</dt><dd>{product.version}</dd></div>
               <div><dt>Health</dt><dd>{product.status === 'Работает' ? '99.98%' : product.status === 'Деградация' ? '96.12%' : '—'}</dd></div>
             </dl>
-            <div className="registry-actions">
+            {canManage && <div className="registry-actions">
               <button className="secondary-button" onClick={() => showDialog(product)}><Edit3 size={15} /> Изменить</button>
               {!product.archivedAt ? (
                 <button className="danger-button" onClick={() => archive(product)} disabled={product.tenants > 0} title={product.tenants > 0 ? 'Сначала отключите активные лицензии' : 'Убрать в архив'}><Archive size={15} /> Убрать</button>
@@ -238,7 +249,7 @@ export function ProductRegistryPage({ products, onChange }: { products: Product[
               {product.archivedAt && !product.isSystem && product.tenants === 0 && (
                 <button className="icon-danger-button" onClick={() => removePermanently(product)} title="Удалить навсегда"><Trash2 size={16} /></button>
               )}
-            </div>
+            </div>}
           </article>
         ))}
       </div>
