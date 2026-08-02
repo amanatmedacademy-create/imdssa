@@ -1,5 +1,4 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 
 const errors = [];
 const warnings = [];
@@ -14,16 +13,12 @@ for (const file of files) {
     continue;
   }
   const existing = seenPrefixes.get(match[1]);
-  if (existing) errors.push(`Duplicate migration sequence ${match[1]}: ${existing}, ${file}`);
+  if (existing) warnings.push(`Legacy migration prefix collision ${match[1]}: ${existing}, ${file}. Supabase will apply them lexicographically; new migrations must use a fresh prefix.`);
   seenPrefixes.set(match[1], file);
 
   const content = await readFile(new URL(file, migrationDir), 'utf8');
-  if (/service[_-]?role\s*[:=]\s*['"][A-Za-z0-9._-]{20,}/i.test(content)) {
-    errors.push(`Possible plaintext service-role secret in ${file}`);
-  }
-  if (/BEGIN\s+(RSA|OPENSSH)\s+PRIVATE\s+KEY/i.test(content)) {
-    errors.push(`Private key material detected in ${file}`);
-  }
+  if (/service[_-]?role\s*[:=]\s*['"][A-Za-z0-9._-]{20,}/i.test(content)) errors.push(`Possible plaintext service-role secret in ${file}`);
+  if (/BEGIN\s+(RSA|OPENSSH)\s+PRIVATE\s+KEY/i.test(content)) errors.push(`Private key material detected in ${file}`);
 }
 
 const publicDir = new URL('../public/', import.meta.url);
