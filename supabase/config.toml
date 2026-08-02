@@ -2,3 +2,12 @@ project_id = "imds-super-admin"
 
 [functions.provisioning-worker]
 verify_jwt = false
+
+[functions.integration-webhook]
+verify_jwt = false
+
+[functions.integration-worker]
+verify_jwt = false
+
+[functions.api-gateway]
+verify_jwt = false
