@@ -9,10 +9,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      VITE_APP_ENV: development
+      VITE_APP_VERSION: 0.3.0
+      VITE_RELEASE_SHA: ${{ github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,8 +33,22 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Validate repository
+        run: npm run validate:repository
+
       - name: Type check
         run: npm run lint
 
       - name: Build
         run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=critical
+
+      - name: Upload production bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: imds-super-admin-${{ github.sha }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
