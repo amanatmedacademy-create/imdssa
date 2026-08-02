@@ -16,6 +16,8 @@ export type Permission =
   | 'integrations.manage'
   | 'operations.read'
   | 'operations.manage'
+  | 'observability.read'
+  | 'observability.manage'
   | 'security.read'
   | 'security.request'
   | 'security.sessions.manage'
@@ -44,6 +46,8 @@ const allPermissions: Permission[] = [
   'integrations.manage',
   'operations.read',
   'operations.manage',
+  'observability.read',
+  'observability.manage',
   'security.read',
   'security.request',
   'security.sessions.manage',
@@ -68,6 +72,7 @@ const rolePermissions: Record<GlobalRole, ReadonlySet<Permission>> = {
     'users.read',
     'integrations.read',
     'operations.read',
+    'observability.read',
     'security.read',
     'security.request',
     'audit.read',
@@ -81,6 +86,7 @@ const rolePermissions: Record<GlobalRole, ReadonlySet<Permission>> = {
     'products.read',
     'subscriptions.read',
     'subscriptions.manage',
+    'observability.read',
     'security.read',
     'security.request',
     'approvals.review',
@@ -96,6 +102,8 @@ const rolePermissions: Record<GlobalRole, ReadonlySet<Permission>> = {
     'integrations.manage',
     'operations.read',
     'operations.manage',
+    'observability.read',
+    'observability.manage',
     'security.read',
     'security.request',
     'audit.read',
@@ -110,6 +118,7 @@ const rolePermissions: Record<GlobalRole, ReadonlySet<Permission>> = {
     'organizations.update',
     'products.read',
     'subscriptions.read',
+    'observability.read',
     'support.read',
     'support.manage',
   ]),
@@ -121,6 +130,7 @@ const rolePermissions: Record<GlobalRole, ReadonlySet<Permission>> = {
     'users.read',
     'integrations.read',
     'operations.read',
+    'observability.read',
     'security.read',
     'audit.read',
     'audit.verify',

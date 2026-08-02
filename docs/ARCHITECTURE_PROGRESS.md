@@ -7,7 +7,7 @@
 5. Identity Directory and access lifecycle — completed.
 6. Security Approval Center, privileged access and audit integrity — completed.
 7. Integration Registry, inbound/outbound webhooks and API Gateway — scheduled.
-8. Observability, incidents and public status management — scheduled.
+8. Observability, Checkmate adapter and incident management — implemented.
 9. Billing operations, invoices, payments and refunds — scheduled.
 10. Customer Success, onboarding, tickets and SLA — scheduled.
 11. Data governance, retention, export, backup and disaster recovery — scheduled.
