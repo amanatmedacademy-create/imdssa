@@ -1,0 +1,91 @@
+.status.info { color: #236f9d; background: #eaf5fb; }
+
+.billing-metrics { margin-bottom: 16px; }
+.section-tabs { display: inline-flex; gap: 4px; margin-bottom: 16px; padding: 4px; background: #e8efed; border-radius: 11px; }
+.section-tabs button { display: flex; align-items: center; gap: 7px; padding: 9px 13px; color: #657a75; background: transparent; border: 0; border-radius: 8px; font-size: 11px; font-weight: 800; }
+.section-tabs button.active { color: #174b45; background: #fff; box-shadow: 0 3px 10px rgba(20,52,47,.08); }
+.section-tabs button span { min-width: 20px; padding: 2px 5px; color: #6d807b; background: #edf2f1; border-radius: 999px; font-size: 9px; }
+
+.billing-panel { overflow: visible; }
+.billing-toolbar { display: grid; grid-template-columns: minmax(260px, 1fr) 180px auto; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid #e7edeb; }
+.billing-toolbar .registry-search { width: 100%; }
+.billing-toolbar > select, .transition-select { padding: 9px 11px; color: #405852; background: #fff; border: 1px solid #d9e5e2; border-radius: 9px; outline: none; font-size: 10px; }
+.billing-toolbar > span { justify-self: end; color: #7c8f8a; font-size: 11px; font-weight: 700; }
+.billing-table-wrap { padding: 0 10px 12px; }
+.billing-table { min-width: 1120px; }
+.billing-table td { vertical-align: middle; }
+.subscription-company { display: flex; align-items: center; gap: 10px; min-width: 235px; }
+.subscription-company strong, .subscription-company span { display: block; }
+.subscription-company strong { font-size: 12px; }
+.subscription-company span { margin-top: 4px; color: #82938f; font-size: 9px; }
+.license-count-button { min-width: 145px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 8px 9px; color: #0f766e; text-align: left; background: #f6faf9; border: 1px solid #dfe8e6; border-radius: 9px; }
+.license-count-button strong, .license-count-button small { display: block; }
+.license-count-button strong { color: #293d38; font-size: 11px; }
+.license-count-button small { margin-top: 2px; color: #81938e; font-size: 8px; }
+.price-cell { color: #263a35; font-size: 11px; white-space: nowrap; }
+.period-cell { display: grid; gap: 5px; min-width: 140px; }
+.period-cell span { display: flex; align-items: center; gap: 5px; margin: 0; color: #627771; font-size: 9px; white-space: nowrap; }
+.renewal-cell { margin: 0; color: #60746f; font-size: 9px; white-space: nowrap; }
+.transition-select { min-width: 130px; }
+
+.tariff-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.tariff-card { display: flex; flex-direction: column; padding: 20px; background: #fff; border: 1px solid #dfe8e6; border-radius: 15px; box-shadow: 0 6px 20px rgba(23,56,49,.035); }
+.tariff-card.inactive { opacity: .65; }
+.tariff-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.tariff-card-header h2 { margin: 5px 0 0; font-size: 20px; }
+.tariff-card > p { min-height: 42px; margin: 14px 0; color: #71847f; font-size: 11px; line-height: 1.55; }
+.tariff-price { padding: 14px; background: #f2f8f6; border-radius: 11px; }
+.tariff-price strong { color: #174b45; font-size: 20px; }
+.tariff-price > span { margin-left: 5px; color: #728680; font-size: 9px; }
+.tariff-price small { display: block; margin-top: 5px; color: #60746f; font-size: 9px; }
+.tariff-terms { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 14px 0; }
+.tariff-terms span { display: flex; align-items: center; gap: 5px; color: #627771; font-size: 9px; }
+.tariff-products { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; min-height: 57px; margin-bottom: 16px; }
+.tariff-products span { margin: 0; padding: 5px 7px; color: #536964; background: #f3f7f6; border-radius: 7px; font-size: 8px; }
+.tariff-card > .secondary-button { margin-top: auto; }
+
+.checkbox-field { display: flex !important; grid-column: auto !important; align-items: center; gap: 8px !important; min-height: 40px; padding: 10px; border: 1px solid #dfe8e6; border-radius: 9px; }
+.checkbox-field input { width: auto !important; accent-color: #0f766e; }
+.checkbox-field > span { margin: 0; }
+.product-selector-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 13px 0 18px; }
+.product-selector-grid label { display: flex; align-items: flex-start; gap: 8px; padding: 10px; border: 1px solid #dfe8e6; border-radius: 9px; cursor: pointer; }
+.product-selector-grid label:has(input:checked) { border-color: #8fd2c9; background: #f0faf8; }
+.product-selector-grid input { margin-top: 2px; accent-color: #0f766e; }
+.product-selector-grid strong, .product-selector-grid small { display: block; }
+.product-selector-grid strong { color: #314a44; font-size: 10px; }
+.product-selector-grid small { margin-top: 3px; color: #849590; font-size: 8px; }
+
+.license-modal { width: min(960px, calc(100vw - 32px)); }
+.license-dialog-content { padding: 24px; }
+.license-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-height: 420px; margin-top: 18px; overflow-y: auto; }
+.license-card { padding: 13px; border: 1px solid #dfe8e6; border-radius: 11px; }
+.license-card-header { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; }
+.license-card-header strong, .license-card-header span { display: block; }
+.license-card-header strong { color: #2b403b; font-size: 11px; }
+.license-card-header > div:nth-child(2) > span { overflow: hidden; margin-top: 3px; color: #81938e; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.entitlement-list { display: grid; gap: 5px; margin-top: 11px; padding-top: 10px; border-top: 1px solid #e7edeb; }
+.entitlement-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 6px 7px; background: #f6f9f8; border-radius: 7px; }
+.entitlement-list code { overflow: hidden; color: #31564f; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.entitlement-list span { margin: 0; color: #2f413d; font-size: 8px; }
+.entitlement-list small { color: #859691; font-size: 7px; }
+.entitlement-list p { margin: 0; color: #8a9995; font-size: 9px; }
+.entitlement-form { margin-top: 18px; padding: 16px; background: #f7faf9; border: 1px solid #dfe8e6; border-radius: 12px; }
+.entitlement-form h3 { display: flex; align-items: center; gap: 7px; margin: 0; color: #31564f; font-size: 12px; }
+.entitlement-form .form-grid { padding: 13px 0; }
+
+@media (max-width: 1180px) {
+  .tariff-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 820px) {
+  .billing-toolbar { grid-template-columns: 1fr; }
+  .billing-toolbar > span { justify-self: start; }
+  .tariff-grid, .license-list { grid-template-columns: 1fr; }
+  .product-selector-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .section-tabs { width: 100%; }
+  .section-tabs button { flex: 1; justify-content: center; }
+  .product-selector-grid { grid-template-columns: 1fr; }
+}
