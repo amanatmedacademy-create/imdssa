@@ -1,16 +1,23 @@
 {
   "name": "imds-super-admin",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview",
-    "lint": "tsc --noEmit"
+    "validate:env": "node scripts/validate-build-env.mjs",
+    "validate:repository": "node scripts/validate-repository.mjs",
+    "lint": "tsc --noEmit",
+    "build": "npm run validate:env && tsc -b && vite build",
+    "build:production": "IMDS_STRICT_ENV=true VITE_APP_ENV=production npm run build",
+    "check": "npm run validate:repository && npm run lint && npm run build",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.0.0",
+    "@supabase/supabase-js": "2.110.8",
     "lucide-react": "1.28.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",

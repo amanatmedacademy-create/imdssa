@@ -13,15 +13,19 @@ Central control plane for the IMDS product ecosystem.
 - Organization editing, privileged archive and restore commands.
 - Product registry for eleven IMDS products with archive safeguards.
 - Subscription, license and entitlement control-plane foundation.
+- Billing Operations, invoices, payments and collection workflows.
 - Identity directory, security approvals and privileged-session controls.
+- Integration registry, API gateway, workers and webhook foundation.
 - Checkmate adapter, service registry, incidents and observability center.
 - Product Analytics Center with users online, active/idle sessions, feature adoption and tenant activity.
 - Browser and Node telemetry SDK packages with a protected Supabase Edge Function ingestion gateway.
+- Customer Success, support cases, SLA and account health foundation.
+- Data Governance, retention, backup and restore registry foundation.
 - RLS policies and explicit Data API grants for control-plane tables.
 - Guarded security-definer RPC functions for privileged mutations and aggregate reporting.
 - Append-only audit and telemetry events with controlled retention.
-- Product seed data and domain integrity triggers.
-- Architecture views for context, services, multi-tenancy and customer lifecycle.
+- Strict environment validation, repository safety checks, Cloudflare security headers and release metadata.
+- CI validation for the application and both telemetry SDK packages.
 
 ## Known product names
 
@@ -47,14 +51,23 @@ npm install
 npm run dev
 ```
 
-Production build:
+Repository validation and development build:
 
 ```bash
-npm run lint
-npm run build
+npm run check
 ```
 
-Without Supabase variables, the UI runs in demo mode and stores editable registry data in the browser.
+Strict production build:
+
+```bash
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co \
+VITE_SUPABASE_ANON_KEY=<anon-key> \
+VITE_APP_VERSION=0.3.0 \
+VITE_RELEASE_SHA=<commit-sha> \
+npm run build:production
+```
+
+Without Supabase variables, non-production environments use demo fallback data. Production builds require valid Supabase public credentials.
 
 ## Supabase activation
 
@@ -69,7 +82,8 @@ Without Supabase variables, the UI runs in demo mode and stores editable registr
 VITE_SUPABASE_URL
 VITE_SUPABASE_ANON_KEY
 VITE_APP_ENV=production
-VITE_APP_VERSION=0.2.0
+VITE_APP_VERSION=0.3.0
+VITE_RELEASE_SHA
 ```
 
 The service role key must never be exposed to the frontend.
@@ -94,29 +108,34 @@ src/core/                         Auth and RBAC
 src/features/organizations/      Tenant/company management
 src/features/observability/      Checkmate projections and incidents
 src/features/analytics/          Product usage and live presence UI
+src/features/support/            Customer Success and support
+src/features/governance/         Retention, backup and restore controls
 src/lib/                          Environment, database types, Supabase client
 packages/telemetry-web/           Browser telemetry SDK
 packages/telemetry-node/          Backend telemetry SDK
 supabase/functions/               Trusted workers and ingestion gateways
 supabase/migrations/              Control-plane database and security
+scripts/                          Build and repository validation
 docs/                             Architecture and deployment runbooks
 ```
 
 ## Architecture principle
 
-The Super Admin is a separate control plane. It stores companies, users, roles, subscriptions, licenses, entitlements, integration state, normalized monitoring projections, product telemetry and audit data. Medical, CRM, marketing and financial operational records remain inside their respective products and are accessed only through versioned APIs and product adapters.
+The Super Admin is a separate control plane. It stores companies, users, roles, subscriptions, licenses, entitlements, integration state, normalized monitoring projections, product telemetry, billing operations, support state, governance metadata and audit data. Medical, CRM, marketing and financial operational records remain inside their respective products and are accessed only through versioned APIs and product adapters.
 
 Product telemetry must never contain medical records, diagnoses, patient notes, phone numbers, email addresses, form content, search text, messages, access tokens or API payloads.
 
-## Delivery order
+## Delivery state
 
-1. Identity, RBAC and companies — implemented.
+1. Identity, RBAC and companies — implemented foundation.
 2. Product Registry and adapter contracts — implemented foundation.
 3. Tariffs, subscriptions, licenses and entitlements — implemented foundation.
 4. Workflow engine and automated tenant provisioning — implemented foundation.
-5. Usage metering and Product Analytics — implemented foundation.
+5. Billing Operations — implemented foundation.
 6. Integration registry, webhooks and background jobs — implemented foundation.
 7. Audit UI, approvals, impersonation and break-glass access — implemented foundation.
 8. Monitoring, Checkmate adapter, incidents and status management — implemented foundation.
-9. Customer onboarding, support, SLA and health score — scheduled.
-10. Data governance, backup and disaster recovery — scheduled.
+9. Usage metering and Product Analytics — implemented foundation.
+10. Customer Success, support, SLA and health score — implemented foundation.
+11. Data governance, retention, backup and disaster recovery — implemented foundation.
+12. Product-by-product production onboarding and operational validation — pending deployment.
