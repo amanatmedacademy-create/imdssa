@@ -31,6 +31,8 @@ import { NavLink, Route, Routes } from 'react-router-dom';
 import { useAuth } from './core/auth';
 import type { Permission } from './core/permissions';
 import { roleLabels } from './core/permissions';
+import { useBilling } from './features/billing/BillingContext';
+import { SubscriptionsPage } from './features/billing/SubscriptionsPage';
 import { CompaniesPage } from './features/organizations/CompaniesPage';
 import { useProductCatalog } from './features/products/ProductCatalogContext';
 import { ProductsPage } from './features/products/ProductsPage';
@@ -144,21 +146,37 @@ function StatusBadge({ value }: { value: ManagedProduct['status'] }) {
   return <span className={`status ${className}`}>{label}</span>;
 }
 
+function formatKzt(value: number) {
+  return new Intl.NumberFormat('ru-RU', {
+    style: 'currency',
+    currency: 'KZT',
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
 function Dashboard() {
   const { can, isDemo } = useAuth();
   const { products, loading: productsLoading, error: productsError } = useProductCatalog();
+  const { subscriptions, loading: billingLoading, error: billingError } = useBilling();
   const activeProducts = products.filter((product) => !product.archivedAt);
+  const activeLicenses = subscriptions.reduce(
+    (sum, subscription) => sum + subscription.licenses.filter((license) => license.status !== 'revoked').length,
+    0,
+  );
+  const mrr = subscriptions
+    .filter((subscription) => subscription.status === 'active')
+    .reduce((sum, subscription) => sum + (subscription.billingInterval === 'annual' ? subscription.effectivePrice / 12 : subscription.billingInterval === 'monthly' ? subscription.effectivePrice : 0), 0);
 
   return (
     <>
       <div className="page-heading"><div><span className="eyebrow">Платформа</span><h1>Центр управления IMDS</h1><p>Компании, продукты, лицензии, инфраструктура и операционный контроль.</p></div>{can('organizations.create') && <NavLink className="primary-button" to="/companies"><Building2 size={17} /> Создать компанию</NavLink>}</div>
       {isDemo && <div className="mode-banner"><ShieldCheck size={18} /><div><strong>Интерфейс работает в демо-режиме</strong><span>Укажите Supabase URL и anon key, примените миграции и создайте platform_owner для включения production-контроля.</span></div></div>}
-      {productsError && <div className="error-banner"><AlertTriangle size={18} /><span>{productsError}</span></div>}
+      {(productsError || billingError) && <div className="error-banner"><AlertTriangle size={18} /><span>{productsError ?? billingError}</span></div>}
       <section className="metrics">
         <Metric icon={Building2} label="Активные компании" value="68" note="+6 за 30 дней" />
         <Metric icon={Users} label="Пользователи" value="1 284" note="1 042 активны" />
-        <Metric icon={PackageCheck} label="Активные лицензии" value="219" note={productsLoading ? 'загрузка каталога...' : `${activeProducts.length} продуктов в реестре`} />
-        <Metric icon={CircleDollarSign} label="MRR" value="₸ 18,4 млн" note="+12,6% к прошлому месяцу" />
+        <Metric icon={PackageCheck} label="Активные лицензии" value={billingLoading ? '…' : String(activeLicenses)} note={productsLoading ? 'загрузка каталога...' : `${activeProducts.length} продуктов в реестре`} />
+        <Metric icon={CircleDollarSign} label="Расчётный MRR" value={billingLoading ? '…' : formatKzt(mrr)} note="без custom interval" />
       </section>
       <section className="content-grid">
         <article className="panel span-2">
@@ -174,7 +192,7 @@ function Dashboard() {
             <div className="alert critical"><AlertTriangle size={18} /><div><strong>Meta Ads API</strong><span>Повышенный процент ошибок: 8,4%</span></div></div>
             <div className="alert"><Webhook size={18} /><div><strong>12 failed webhooks</strong><span>Ожидают повторной обработки</span></div></div>
             <div className="alert"><KeyRound size={18} /><div><strong>7 токенов истекают</strong><span>В течение ближайших 14 дней</span></div></div>
-            <div className="alert"><BadgeDollarSign size={18} /><div><strong>4 просроченные подписки</strong><span>Общая сумма ₸ 940 000</span></div></div>
+            <div className="alert"><BadgeDollarSign size={18} /><div><strong>{subscriptions.filter((subscription) => ['past_due', 'grace_period'].includes(subscription.status)).length} проблемных подписок</strong><span>Требуют проверки оплаты</span></div></div>
           </div>
         </article>
         <article className="panel span-2">
@@ -185,7 +203,7 @@ function Dashboard() {
           <div className="panel-header"><div><h2>Быстрые действия</h2><p>Без перехода между разделами</p></div></div>
           <div className="quick-actions">
             <NavLink to="/companies"><Building2 size={18} /><span><strong>Новая компания</strong><small>Создать tenant и владельца</small></span></NavLink>
-            <NavLink to="/subscriptions"><PackageCheck size={18} /><span><strong>Выдать лицензию</strong><small>Подключить продукт или trial</small></span></NavLink>
+            <NavLink to="/subscriptions"><PackageCheck size={18} /><span><strong>Выдать лицензию</strong><small>Активировать тариф и продукты</small></span></NavLink>
             <NavLink to="/support"><LockKeyhole size={18} /><span><strong>Support session</strong><small>Безопасный вход от имени клиента</small></span></NavLink>
             <NavLink to="/operations"><CloudCog size={18} /><span><strong>Incident mode</strong><small>Ограничить проблемный сервис</small></span></NavLink>
           </div>
@@ -206,7 +224,7 @@ export function App() {
         <Route path="/" element={<RequirePermission permission="dashboard.read"><Dashboard /></RequirePermission>} />
         <Route path="/companies" element={<RequirePermission permission="organizations.read"><CompaniesPage /></RequirePermission>} />
         <Route path="/products" element={<RequirePermission permission="products.read"><ProductsPage /></RequirePermission>} />
-        <Route path="/subscriptions" element={<RequirePermission permission="subscriptions.read"><Placeholder title="Тарифы и подписки" description="Лицензии, счета, платежи, grace period и лимиты использования." icon={BadgeDollarSign} /></RequirePermission>} />
+        <Route path="/subscriptions" element={<RequirePermission permission="subscriptions.read"><SubscriptionsPage /></RequirePermission>} />
         <Route path="/users" element={<RequirePermission permission="users.read"><Placeholder title="Identity Directory" description="Единый каталог пользователей, ролей, продуктов и филиалов." icon={Users} /></RequirePermission>} />
         <Route path="/integrations" element={<RequirePermission permission="integrations.read"><Placeholder title="Интеграции" description="API-адаптеры, webhooks, секреты, токены и фоновые синхронизации." icon={Network} /></RequirePermission>} />
         <Route path="/operations" element={<RequirePermission permission="operations.read"><Placeholder title="Operations Center" description="Мониторинг, очереди, релизы, incidents и command center." icon={Gauge} /></RequirePermission>} />
