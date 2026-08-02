@@ -32,9 +32,10 @@ import { useAuth } from './core/auth';
 import type { Permission } from './core/permissions';
 import { roleLabels } from './core/permissions';
 import { CompaniesPage } from './features/organizations/CompaniesPage';
+import { useProductCatalog } from './features/products/ProductCatalogContext';
+import { ProductsPage } from './features/products/ProductsPage';
+import type { ManagedProduct } from './features/products/productRepository';
 import { env } from './lib/env';
-import type { Product } from './productRegistry';
-import { ProductRegistryPage, useProductRegistry } from './productRegistry';
 
 type NavigationItem = {
   to: string;
@@ -129,29 +130,42 @@ function Metric({ icon: Icon, label, value, note }: { icon: React.ElementType; l
   return <article className="metric-card"><div className="metric-icon"><Icon size={21} /></div><div><span>{label}</span><strong>{value}</strong><small>{note}</small></div></article>;
 }
 
-function StatusBadge({ value }: { value: Product['status'] }) {
-  return <span className={`status ${value === 'Работает' ? 'ok' : value === 'Деградация' ? 'warn' : 'muted'}`}>{value}</span>;
+function StatusBadge({ value }: { value: ManagedProduct['status'] }) {
+  const label = value === 'active'
+    ? 'Работает'
+    : value === 'degraded'
+      ? 'Деградация'
+      : value === 'maintenance'
+        ? 'Техработы'
+        : value === 'disabled'
+          ? 'Отключён'
+          : 'Настройка';
+  const className = value === 'active' ? 'ok' : value === 'degraded' || value === 'maintenance' ? 'warn' : 'muted';
+  return <span className={`status ${className}`}>{label}</span>;
 }
 
-function Dashboard({ products }: { products: Product[] }) {
+function Dashboard() {
   const { can, isDemo } = useAuth();
+  const { products, loading: productsLoading, error: productsError } = useProductCatalog();
   const activeProducts = products.filter((product) => !product.archivedAt);
 
   return (
     <>
       <div className="page-heading"><div><span className="eyebrow">Платформа</span><h1>Центр управления IMDS</h1><p>Компании, продукты, лицензии, инфраструктура и операционный контроль.</p></div>{can('organizations.create') && <NavLink className="primary-button" to="/companies"><Building2 size={17} /> Создать компанию</NavLink>}</div>
       {isDemo && <div className="mode-banner"><ShieldCheck size={18} /><div><strong>Интерфейс работает в демо-режиме</strong><span>Укажите Supabase URL и anon key, примените миграции и создайте platform_owner для включения production-контроля.</span></div></div>}
+      {productsError && <div className="error-banner"><AlertTriangle size={18} /><span>{productsError}</span></div>}
       <section className="metrics">
         <Metric icon={Building2} label="Активные компании" value="68" note="+6 за 30 дней" />
         <Metric icon={Users} label="Пользователи" value="1 284" note="1 042 активны" />
-        <Metric icon={PackageCheck} label="Активные лицензии" value="219" note={`${activeProducts.length} продуктов в реестре`} />
+        <Metric icon={PackageCheck} label="Активные лицензии" value="219" note={productsLoading ? 'загрузка каталога...' : `${activeProducts.length} продуктов в реестре`} />
         <Metric icon={CircleDollarSign} label="MRR" value="₸ 18,4 млн" note="+12,6% к прошлому месяцу" />
       </section>
       <section className="content-grid">
         <article className="panel span-2">
-          <div className="panel-header"><div><h2>Состояние продуктов</h2><p>Версии, tenants и доступность сервисов</p></div><NavLink to="/products">Все продукты <ChevronRight size={16} /></NavLink></div>
+          <div className="panel-header"><div><h2>Состояние продуктов</h2><p>Версии, tenants, адаптеры и доступность сервисов</p></div><NavLink to="/products">Все продукты <ChevronRight size={16} /></NavLink></div>
           <div className="product-grid">
-            {activeProducts.slice(0, 6).map((product) => <div className="product-card" key={product.id}><div className="product-symbol"><AppWindow size={20} /></div><div className="product-info"><strong>{product.name}</strong><span>{product.tenants} компаний · v{product.version}</span></div><StatusBadge value={product.status} /></div>)}
+            {activeProducts.slice(0, 6).map((product) => <div className="product-card" key={product.id}><div className="product-symbol"><AppWindow size={20} /></div><div className="product-info"><strong>{product.name}</strong><span>{product.tenants} компаний · v{product.version || '—'} · {product.adapter ? `adapter ${product.adapter.contractVersion}` : 'без адаптера'}</span></div><StatusBadge value={product.status} /></div>)}
+            {!productsLoading && activeProducts.length === 0 && <div className="dashboard-empty">Product Registry пуст.</div>}
           </div>
         </article>
         <article className="panel">
@@ -186,14 +200,12 @@ function Placeholder({ title, description, icon: Icon }: { title: string; descri
 }
 
 export function App() {
-  const { products, setProducts } = useProductRegistry();
-
   return (
     <Shell>
       <Routes>
-        <Route path="/" element={<RequirePermission permission="dashboard.read"><Dashboard products={products} /></RequirePermission>} />
+        <Route path="/" element={<RequirePermission permission="dashboard.read"><Dashboard /></RequirePermission>} />
         <Route path="/companies" element={<RequirePermission permission="organizations.read"><CompaniesPage /></RequirePermission>} />
-        <Route path="/products" element={<RequirePermission permission="products.read"><ProductRegistryPage products={products} onChange={setProducts} /></RequirePermission>} />
+        <Route path="/products" element={<RequirePermission permission="products.read"><ProductsPage /></RequirePermission>} />
         <Route path="/subscriptions" element={<RequirePermission permission="subscriptions.read"><Placeholder title="Тарифы и подписки" description="Лицензии, счета, платежи, grace period и лимиты использования." icon={BadgeDollarSign} /></RequirePermission>} />
         <Route path="/users" element={<RequirePermission permission="users.read"><Placeholder title="Identity Directory" description="Единый каталог пользователей, ролей, продуктов и филиалов." icon={Users} /></RequirePermission>} />
         <Route path="/integrations" element={<RequirePermission permission="integrations.read"><Placeholder title="Интеграции" description="API-адаптеры, webhooks, секреты, токены и фоновые синхронизации." icon={Network} /></RequirePermission>} />
