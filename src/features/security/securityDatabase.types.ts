@@ -296,4 +296,17 @@ export type SecurityDatabase = {
   };
 };
 
-export type SecuritySupabaseClient = SupabaseClient<SecurityDatabase>;
+type BaseSecuritySupabaseClient = SupabaseClient<SecurityDatabase>;
+type SecurityFunctionName = keyof SecurityDatabase['public']['Functions'];
+type SecurityFunctionArgs<Name extends SecurityFunctionName> = SecurityDatabase['public']['Functions'][Name]['Args'];
+type SecurityFunctionReturns<Name extends SecurityFunctionName> = SecurityDatabase['public']['Functions'][Name]['Returns'];
+
+export type SecuritySupabaseClient = Omit<BaseSecuritySupabaseClient, 'rpc'> & {
+  rpc<Name extends SecurityFunctionName>(
+    functionName: Name,
+    args: SecurityFunctionArgs<Name>,
+  ): Promise<{
+    data: SecurityFunctionReturns<Name> | null;
+    error: { message: string } | null;
+  }>;
+};
