@@ -5,12 +5,17 @@ import { App } from './App';
 import { AuthGate } from './core/AuthGate';
 import { AuthProvider } from './core/auth';
 import { BillingProvider } from './features/billing/BillingContext';
+import { IdentityProvider } from './features/identity/IdentityContext';
+import { OperationsProvider } from './features/operations/OperationsContext';
 import { ProductCatalogProvider } from './features/products/ProductCatalogContext';
+import { SecurityProvider } from './features/security/SecurityContext';
 import './styles.css';
 import './productRegistry.css';
 import './controlPlane.css';
 import './productCatalog.css';
 import './billing.css';
+import './operations.css';
+import './security.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -19,7 +24,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <AuthGate>
           <ProductCatalogProvider>
             <BillingProvider>
-              <App />
+              <IdentityProvider>
+                <OperationsProvider>
+                  <SecurityProvider>
+                    <App />
+                  </SecurityProvider>
+                </OperationsProvider>
+              </IdentityProvider>
             </BillingProvider>
           </ProductCatalogProvider>
         </AuthGate>
