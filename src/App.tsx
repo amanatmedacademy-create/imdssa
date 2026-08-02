@@ -16,29 +16,44 @@ import {
   LayoutDashboard,
   LifeBuoy,
   LockKeyhole,
+  LogOut,
   Network,
   PackageCheck,
   Search,
   Settings,
+  ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
   Users,
   Webhook,
 } from 'lucide-react';
 import { NavLink, Route, Routes } from 'react-router-dom';
-import { Product, ProductRegistryPage, useProductRegistry } from './productRegistry';
+import { useAuth } from './core/auth';
+import type { Permission } from './core/permissions';
+import { roleLabels } from './core/permissions';
+import { CompaniesPage } from './features/organizations/CompaniesPage';
+import { env } from './lib/env';
+import type { Product } from './productRegistry';
+import { ProductRegistryPage, useProductRegistry } from './productRegistry';
 
-const nav = [
-  { to: '/', label: 'Обзор', icon: LayoutDashboard },
-  { to: '/companies', label: 'Компании', icon: Building2 },
-  { to: '/products', label: 'Продукты', icon: Boxes },
-  { to: '/subscriptions', label: 'Подписки', icon: BadgeDollarSign },
-  { to: '/users', label: 'Пользователи', icon: Users },
-  { to: '/integrations', label: 'Интеграции', icon: Network },
-  { to: '/operations', label: 'Операции', icon: Activity },
-  { to: '/audit', label: 'Аудит', icon: ShieldCheck },
-  { to: '/support', label: 'Поддержка', icon: Headphones },
-  { to: '/settings', label: 'Настройки', icon: Settings },
+type NavigationItem = {
+  to: string;
+  label: string;
+  icon: React.ElementType;
+  permission: Permission;
+};
+
+const nav: NavigationItem[] = [
+  { to: '/', label: 'Обзор', icon: LayoutDashboard, permission: 'dashboard.read' },
+  { to: '/companies', label: 'Компании', icon: Building2, permission: 'organizations.read' },
+  { to: '/products', label: 'Продукты', icon: Boxes, permission: 'products.read' },
+  { to: '/subscriptions', label: 'Подписки', icon: BadgeDollarSign, permission: 'subscriptions.read' },
+  { to: '/users', label: 'Пользователи', icon: Users, permission: 'users.read' },
+  { to: '/integrations', label: 'Интеграции', icon: Network, permission: 'integrations.read' },
+  { to: '/operations', label: 'Операции', icon: Activity, permission: 'operations.read' },
+  { to: '/audit', label: 'Аудит', icon: ShieldCheck, permission: 'audit.read' },
+  { to: '/support', label: 'Поддержка', icon: Headphones, permission: 'support.read' },
+  { to: '/settings', label: 'Настройки', icon: Settings, permission: 'settings.read' },
 ];
 
 const companies = [
@@ -48,7 +63,16 @@ const companies = [
   { name: 'Nova Health', city: 'Алматы', products: 2, users: 12, plan: 'Start', health: 57 },
 ];
 
+function initials(value: string) {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  return (parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : value.slice(0, 2)).toUpperCase();
+}
+
 function Shell({ children }: { children: React.ReactNode }) {
+  const { profile, role, can, isDemo, signOut } = useAuth();
+  const visibleNavigation = nav.filter((item) => can(item.permission));
+  const displayName = profile?.full_name || profile?.email || 'Super Admin';
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -60,7 +84,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <nav>
-          {nav.map(({ to, label, icon: Icon }) => (
+          {visibleNavigation.map(({ to, label, icon: Icon }) => (
             <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => (isActive ? 'nav-item active' : 'nav-item')}>
               <Icon size={18} />
               <span>{label}</span>
@@ -68,8 +92,8 @@ function Shell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <div className="environment"><span /> Production</div>
-          <small>Control plane v0.2.0</small>
+          <div className={`environment ${isDemo ? 'demo' : ''}`}><span /> {isDemo ? 'Demo mode' : env.appEnv}</div>
+          <small>Control plane v{env.appVersion}</small>
         </div>
       </aside>
       <main className="main">
@@ -77,11 +101,26 @@ function Shell({ children }: { children: React.ReactNode }) {
           <div className="search"><Search size={17} /><input placeholder="Компания, БИН, пользователь, tenant ID..." /></div>
           <div className="top-actions">
             <button className="icon-button" aria-label="Уведомления"><Bell size={18} /><span className="notification-dot" /></button>
-            <div className="profile"><div className="avatar">SA</div><div><strong>Super Admin</strong><span>platform_owner</span></div></div>
+            <div className="profile"><div className="avatar">{initials(displayName)}</div><div><strong>{displayName}</strong><span>{role ? roleLabels[role] : 'Нет роли'}</span></div></div>
+            {!isDemo && <button className="icon-button" type="button" aria-label="Выйти" title="Выйти" onClick={() => void signOut()}><LogOut size={18} /></button>}
           </div>
         </header>
         <div className="page">{children}</div>
       </main>
+    </div>
+  );
+}
+
+function RequirePermission({ permission, children }: { permission: Permission; children: React.ReactNode }) {
+  const { can } = useAuth();
+  if (can(permission)) return <>{children}</>;
+  return (
+    <div className="access-denied">
+      <div><ShieldAlert size={34} /></div>
+      <span className="eyebrow">RBAC</span>
+      <h1>Недостаточно прав</h1>
+      <p>Текущая глобальная роль не разрешает открывать этот раздел.</p>
+      <NavLink className="primary-button" to="/">Вернуться на обзор</NavLink>
     </div>
   );
 }
@@ -95,11 +134,13 @@ function StatusBadge({ value }: { value: Product['status'] }) {
 }
 
 function Dashboard({ products }: { products: Product[] }) {
+  const { can, isDemo } = useAuth();
   const activeProducts = products.filter((product) => !product.archivedAt);
 
   return (
     <>
-      <div className="page-heading"><div><span className="eyebrow">Платформа</span><h1>Центр управления IMDS</h1><p>Компании, продукты, лицензии, инфраструктура и операционный контроль.</p></div><button className="primary-button"><Building2 size={17} /> Создать компанию</button></div>
+      <div className="page-heading"><div><span className="eyebrow">Платформа</span><h1>Центр управления IMDS</h1><p>Компании, продукты, лицензии, инфраструктура и операционный контроль.</p></div>{can('organizations.create') && <NavLink className="primary-button" to="/companies"><Building2 size={17} /> Создать компанию</NavLink>}</div>
+      {isDemo && <div className="mode-banner"><ShieldCheck size={18} /><div><strong>Интерфейс работает в демо-режиме</strong><span>Укажите Supabase URL и anon key, примените миграции и создайте platform_owner для включения production-контроля.</span></div></div>}
       <section className="metrics">
         <Metric icon={Building2} label="Активные компании" value="68" note="+6 за 30 дней" />
         <Metric icon={Users} label="Пользователи" value="1 284" note="1 042 активны" />
@@ -129,10 +170,10 @@ function Dashboard({ products }: { products: Product[] }) {
         <article className="panel">
           <div className="panel-header"><div><h2>Быстрые действия</h2><p>Без перехода между разделами</p></div></div>
           <div className="quick-actions">
-            <button><Building2 size={18} /><span><strong>Новая компания</strong><small>Создать tenant и владельца</small></span></button>
-            <button><PackageCheck size={18} /><span><strong>Выдать лицензию</strong><small>Подключить продукт или trial</small></span></button>
-            <button><LockKeyhole size={18} /><span><strong>Support session</strong><small>Безопасный вход от имени клиента</small></span></button>
-            <button><CloudCog size={18} /><span><strong>Incident mode</strong><small>Ограничить проблемный сервис</small></span></button>
+            <NavLink to="/companies"><Building2 size={18} /><span><strong>Новая компания</strong><small>Создать tenant и владельца</small></span></NavLink>
+            <NavLink to="/subscriptions"><PackageCheck size={18} /><span><strong>Выдать лицензию</strong><small>Подключить продукт или trial</small></span></NavLink>
+            <NavLink to="/support"><LockKeyhole size={18} /><span><strong>Support session</strong><small>Безопасный вход от имени клиента</small></span></NavLink>
+            <NavLink to="/operations"><CloudCog size={18} /><span><strong>Incident mode</strong><small>Ограничить проблемный сервис</small></span></NavLink>
           </div>
         </article>
       </section>
@@ -141,11 +182,26 @@ function Dashboard({ products }: { products: Product[] }) {
 }
 
 function Placeholder({ title, description, icon: Icon }: { title: string; description: string; icon: React.ElementType }) {
-  return <><div className="page-heading"><div><span className="eyebrow">IMDS Control Plane</span><h1>{title}</h1><p>{description}</p></div></div><div className="empty-state"><div><Icon size={34} /></div><h2>Раздел подготовлен в архитектуре</h2><p>Следующий этап — подключение Supabase, RLS, API-команд и реальных данных.</p><button className="primary-button"><SlidersHorizontal size={17} /> Настроить модуль</button></div></>;
+  return <><div className="page-heading"><div><span className="eyebrow">IMDS Control Plane</span><h1>{title}</h1><p>{description}</p></div></div><div className="empty-state"><div><Icon size={34} /></div><h2>Раздел подготовлен в архитектуре</h2><p>Модуль будет подключён к Supabase, RLS, API-командам и реальным данным на следующем этапе.</p><button className="primary-button"><SlidersHorizontal size={17} /> Настроить модуль</button></div></>;
 }
 
 export function App() {
   const { products, setProducts } = useProductRegistry();
 
-  return <Shell><Routes><Route path="/" element={<Dashboard products={products} />} /><Route path="/products" element={<ProductRegistryPage products={products} onChange={setProducts} />} /><Route path="/companies" element={<Placeholder title="Компании и tenants" description="Холдинги, юридические лица, филиалы, владельцы и статусы доступа." icon={Building2} />} /><Route path="/subscriptions" element={<Placeholder title="Тарифы и подписки" description="Лицензии, счета, платежи, grace period и лимиты использования." icon={BadgeDollarSign} />} /><Route path="/users" element={<Placeholder title="Identity Directory" description="Единый каталог пользователей, ролей, продуктов и филиалов." icon={Users} />} /><Route path="/integrations" element={<Placeholder title="Интеграции" description="API-адаптеры, webhooks, секреты, токены и фоновые синхронизации." icon={Network} />} /><Route path="/operations" element={<Placeholder title="Operations Center" description="Мониторинг, очереди, релизы, incidents и command center." icon={Gauge} />} /><Route path="/audit" element={<Placeholder title="Аудит и безопасность" description="Неизменяемый журнал действий, approvals и break-glass access." icon={FileCheck2} />} /><Route path="/support" element={<Placeholder title="Customer Success и Support" description="Онбординг, обращения, SLA, диагностика и health score." icon={LifeBuoy} />} /><Route path="/settings" element={<Placeholder title="Настройки платформы" description="Роли, feature flags, окружения, уведомления и политики хранения." icon={Settings} />} /></Routes></Shell>;
+  return (
+    <Shell>
+      <Routes>
+        <Route path="/" element={<RequirePermission permission="dashboard.read"><Dashboard products={products} /></RequirePermission>} />
+        <Route path="/companies" element={<RequirePermission permission="organizations.read"><CompaniesPage /></RequirePermission>} />
+        <Route path="/products" element={<RequirePermission permission="products.read"><ProductRegistryPage products={products} onChange={setProducts} /></RequirePermission>} />
+        <Route path="/subscriptions" element={<RequirePermission permission="subscriptions.read"><Placeholder title="Тарифы и подписки" description="Лицензии, счета, платежи, grace period и лимиты использования." icon={BadgeDollarSign} /></RequirePermission>} />
+        <Route path="/users" element={<RequirePermission permission="users.read"><Placeholder title="Identity Directory" description="Единый каталог пользователей, ролей, продуктов и филиалов." icon={Users} /></RequirePermission>} />
+        <Route path="/integrations" element={<RequirePermission permission="integrations.read"><Placeholder title="Интеграции" description="API-адаптеры, webhooks, секреты, токены и фоновые синхронизации." icon={Network} /></RequirePermission>} />
+        <Route path="/operations" element={<RequirePermission permission="operations.read"><Placeholder title="Operations Center" description="Мониторинг, очереди, релизы, incidents и command center." icon={Gauge} /></RequirePermission>} />
+        <Route path="/audit" element={<RequirePermission permission="audit.read"><Placeholder title="Аудит и безопасность" description="Неизменяемый журнал действий, approvals и break-glass access." icon={FileCheck2} /></RequirePermission>} />
+        <Route path="/support" element={<RequirePermission permission="support.read"><Placeholder title="Customer Success и Support" description="Онбординг, обращения, SLA, диагностика и health score." icon={LifeBuoy} /></RequirePermission>} />
+        <Route path="/settings" element={<RequirePermission permission="settings.read"><Placeholder title="Настройки платформы" description="Роли, feature flags, окружения, уведомления и политики хранения." icon={Settings} /></RequirePermission>} />
+      </Routes>
+    </Shell>
+  );
 }
