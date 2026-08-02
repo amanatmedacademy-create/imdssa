@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   AppWindow,
   BadgeDollarSign,
+  BarChart3,
   Bell,
   Boxes,
   Building2,
@@ -30,6 +31,7 @@ import { NavLink, Route, Routes } from 'react-router-dom';
 import { useAuth } from './core/auth';
 import type { Permission } from './core/permissions';
 import { roleLabels } from './core/permissions';
+import { ProductAnalyticsPage } from './features/analytics/ProductAnalyticsPage';
 import { useBilling } from './features/billing/BillingContext';
 import { SubscriptionsPage } from './features/billing/SubscriptionsPage';
 import { IdentityDirectoryPage } from './features/identity/IdentityDirectoryPage';
@@ -59,6 +61,7 @@ const nav: NavigationItem[] = [
   { to: '/integrations', label: 'Интеграции', icon: Network, permission: 'integrations.read' },
   { to: '/operations', label: 'Операции', icon: Activity, permission: 'operations.read' },
   { to: '/observability', label: 'Мониторинг', icon: Gauge, permission: 'observability.read' },
+  { to: '/analytics', label: 'Аналитика продуктов', icon: BarChart3, permission: 'analytics.read' },
   { to: '/security', label: 'Безопасность', icon: ShieldCheck, permission: 'security.read' },
   { to: '/support', label: 'Поддержка', icon: Headphones, permission: 'support.read' },
   { to: '/settings', label: 'Настройки', icon: Settings, permission: 'settings.read' },
@@ -212,7 +215,7 @@ function Dashboard() {
           <div className="quick-actions">
             <NavLink to="/companies"><Building2 size={18} /><span><strong>Новая компания</strong><small>Создать tenant и владельца</small></span></NavLink>
             <NavLink to="/subscriptions"><PackageCheck size={18} /><span><strong>Выдать лицензию</strong><small>Активировать тариф и продукты</small></span></NavLink>
-            <NavLink to="/security"><LockKeyhole size={18} /><span><strong>Support session</strong><small>Запросить согласованный вход от имени клиента</small></span></NavLink>
+            <NavLink to="/analytics"><BarChart3 size={18} /><span><strong>Product Analytics</strong><small>Проверить online, активность и функции</small></span></NavLink>
             <NavLink to="/observability"><CloudCog size={18} /><span><strong>Incident Center</strong><small>Проверить сервисы и активные инциденты</small></span></NavLink>
           </div>
         </article>
@@ -237,6 +240,7 @@ export function App() {
         <Route path="/integrations" element={<RequirePermission permission="integrations.read"><Placeholder title="Интеграции" description="API-адаптеры, webhooks, секреты, токены и фоновые синхронизации." icon={Network} /></RequirePermission>} />
         <Route path="/operations" element={<RequirePermission permission="operations.read"><OperationsPage /></RequirePermission>} />
         <Route path="/observability" element={<RequirePermission permission="observability.read"><ObservabilityPage /></RequirePermission>} />
+        <Route path="/analytics" element={<RequirePermission permission="analytics.read"><ProductAnalyticsPage /></RequirePermission>} />
         <Route path="/security" element={<RequirePermission permission="security.read"><SecurityCenterPage /></RequirePermission>} />
         <Route path="/audit" element={<RequirePermission permission="security.read"><SecurityCenterPage /></RequirePermission>} />
         <Route path="/support" element={<RequirePermission permission="support.read"><Placeholder title="Customer Success и Support" description="Онбординг, обращения, SLA, диагностика и health score." icon={LifeBuoy} /></RequirePermission>} />
