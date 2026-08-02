@@ -1,0 +1,4 @@
+project_id = "imds-super-admin"
+
+[functions.provisioning-worker]
+verify_jwt = false
