@@ -28,13 +28,14 @@ app.use(telemetry.createHttpMiddleware((request) => ({
   userRole: request.user?.role,
   organizationId: request.tenant?.controlPlaneId,
   branchId: request.branch?.controlPlaneId,
-  sessionId: request.headers['x-imds-session-id'],
   moduleKey: 'crm_api',
   moduleOwnerProductKey: 'imds-crm',
 })));
 ```
 
 Only the normalized route template, HTTP method, status code and duration are sent. Request bodies, response bodies, query strings and authorization headers are never sent.
+
+Browser session identifiers must not be reused by a server telemetry source. Browser presence and backend performance are correlated through aggregate product, tenant, user, route and release dimensions; distributed request tracing belongs in the observability trace layer.
 
 ## Timed operations
 

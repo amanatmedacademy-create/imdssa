@@ -100,13 +100,6 @@ function sanitizeProperties(value: Record<string, unknown> | undefined): Record<
   return (sanitizeValue(value ?? {}) as Record<string, unknown>) ?? {};
 }
 
-function readHeader(request: RequestLike, name: string): string | null {
-  const headers = request.headers ?? {};
-  const exact = headers[name] ?? headers[name.toLowerCase()];
-  if (Array.isArray(exact)) return exact[0]?.slice(0, 160) ?? null;
-  return typeof exact === 'string' ? exact.slice(0, 160) : null;
-}
-
 function routeFromRequest(request: RequestLike): string | null {
   const routePath = typeof request.route === 'string' ? request.route : request.route?.path;
   return safeRoute(routePath ?? request.originalUrl ?? request.url);
@@ -207,7 +200,7 @@ export class ImdsTelemetryNode {
             statusCode,
             errorCode: failed ? `HTTP_${statusCode}` : undefined,
           },
-          sessionId: context.sessionId ?? readHeader(request, 'x-imds-session-id'),
+          sessionId: context.sessionId ?? null,
         });
       };
       response.on('finish', finish);

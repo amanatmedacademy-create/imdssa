@@ -458,7 +458,7 @@ export class ImdsTelemetryWeb {
   };
 
   private handlePageHide = (): void => {
-    this.heartbeat('closed');
+    this.heartbeat('offline');
     void this.flush(true);
   };
 

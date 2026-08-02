@@ -1,36 +1,35 @@
 # IMDS Product Analytics and Live Presence
 
-## Purpose
+## Назначение
 
-This module answers operational and product questions that external uptime monitoring cannot answer:
+Product Analytics отвечает на вопросы, которые внешний uptime-monitoring не закрывает:
 
-- which IMDS products are being used now;
-- who is online and who is actively working;
-- real active time versus an idle browser tab;
-- DAU, unique users, sessions and usage trends;
-- which modules and features are adopted;
-- which companies have declining activity or elevated errors;
-- which host product displayed a module and which product owns that module;
-- whether browser and backend releases are producing failures.
+- какой продукт и модуль используют сейчас;
+- кто онлайн, кто реально активен, а кто оставил вкладку открытой;
+- сколько активного времени приходится на пользователя, компанию и продукт;
+- какие функции используются, а какие не получают adoption;
+- где растёт доля ошибок;
+- какие компании сокращают активность и входят в риск оттока;
+- внутри какого host-продукта открыт модуль и какому продукту он принадлежит.
 
-Checkmate remains the source of truth for availability, response time, SSL, ports, infrastructure and incidents. Product Analytics is the source of truth for in-product usage and presence.
+Checkmate остаётся источником истины для uptime, response time, SSL, портов, инфраструктуры и инцидентов. Product Analytics является источником истины для присутствия и использования функций.
 
 ```text
 Checkmate
-  -> Is the product reachable and healthy?
+  -> Доступен ли продукт и инфраструктура?
 
 @imds/telemetry-web + @imds/telemetry-node
-  -> Who is using the product, for how long, and which approved features are used?
+  -> Кто, сколько и какими функциями пользуется?
 
 IMDS Super Admin
-  -> One operational view of products, companies, incidents and usage.
+  -> Единый операционный экран продуктов, компаний, инцидентов и usage.
 ```
 
-## Components delivered
+## Реализованные компоненты
 
-### Control-plane database
+### База control plane
 
-Migration `supabase/migrations/0017_product_analytics.sql` adds:
+Миграция `supabase/migrations/0020_product_analytics.sql` добавляет:
 
 - `telemetry_sources`;
 - `telemetry_event_definitions`;
@@ -38,61 +37,60 @@ Migration `supabase/migrations/0017_product_analytics.sql` adds:
 - `product_usage_events`;
 - `product_usage_daily_rollups`;
 - `telemetry_ingestion_batches`;
-- live-presence and source metadata views;
-- protected configuration and ingestion RPC functions;
-- session expiry, daily rollup and retention functions;
-- a period-aware analytics snapshot RPC;
-- RLS, explicit grants and append-only protections.
+- представления live-сессий и источников;
+- RPC для конфигурации источников, ingestion и aggregate snapshot;
+- функции session expiry, daily rollup и retention cleanup;
+- RLS, явные Data API grants и append-only ограничения.
 
 ### Ingestion gateway
 
-`supabase/functions/telemetry-ingest/index.ts` provides:
+`supabase/functions/telemetry-ingest/index.ts` обеспечивает:
 
-- source-key and write-key authentication;
-- SHA-256 write-key comparison;
-- browser origin allow-lists;
-- source-level rate limiting;
-- 256 KiB request and 100-event batch limits;
-- registered event-name enforcement;
-- property allow-lists;
-- sensitive-field filtering;
-- UUID and timestamp validation;
-- deterministic session-level sampling;
-- idempotent request and event handling;
-- request-level audit without IP addresses or raw payload storage.
+- source key + write key authentication;
+- сравнение SHA-256-хэша write key;
+- точный browser origin allow-list;
+- rate limit на источник;
+- лимит запроса 256 KiB и до 100 событий;
+- разрешённый каталог event names;
+- property allow-list;
+- фильтрацию чувствительных полей;
+- проверку UUID и временных меток;
+- deterministic sampling;
+- idempotency по request ID и event ID;
+- аудит batch без хранения IP и raw request body.
 
-### SDK packages
+### SDK
 
-- `packages/telemetry-web` — browser sessions, heartbeat, active/idle time, navigation and feature events.
-- `packages/telemetry-node` — sanitized backend timing and error events.
+- `packages/telemetry-web` — browser session, heartbeat, active/idle time, navigation, module и feature events, offline queue.
+- `packages/telemetry-node` — sanitized backend latency, status и error events.
 
 ### Super Admin
 
-Route `/analytics` contains:
+Раздел `/analytics` содержит:
 
-- portfolio overview;
-- live users;
-- product and module usage;
-- feature success/failure rates;
-- company activity and risk;
-- telemetry source inventory;
-- source provisioning with a one-time write-key display.
+- сводку по всей экосистеме;
+- пользователей онлайн;
+- active/idle session time;
+- использование модулей и функций;
+- активность компаний и риск;
+- реестр telemetry sources;
+- создание источника и одноразовую выдачу write key.
 
-## Security and privacy boundary
+## Граница безопасности и приватности
 
-Product telemetry is not a medical data store.
+Product telemetry не является хранилищем медицинских данных.
 
-Never emit:
+Запрещено отправлять:
 
-- patient names, IINs or patient identifiers;
-- diagnoses, symptoms, anamnesis, treatment plans or physician notes;
-- phone numbers, email addresses or postal addresses;
-- search text, chat messages, comments or free-form form values;
-- access tokens, cookies, passwords, authorization headers or API secrets;
-- request bodies, response bodies, SQL or raw external-provider payloads;
-- URLs containing query strings or fragments.
+- ФИО пациента, ИИН и идентификаторы пациента;
+- диагнозы, симптомы, анамнез, лечение и медицинские заметки;
+- телефоны, email и адреса;
+- текст поиска, комментарии, сообщения и свободные значения форм;
+- access tokens, cookies, passwords и authorization headers;
+- request/response bodies, SQL и raw payload внешнего провайдера;
+- URL query string и fragment.
 
-Allowed examples:
+Разрешённый пример:
 
 ```json
 {
@@ -104,141 +102,126 @@ Allowed examples:
 }
 ```
 
-Disallowed example:
+SDK выполняет первую фильтрацию. Edge Function повторно валидирует payload и удаляет свойства, которых нет в event catalog.
 
-```json
-{
-  "eventName": "feature_used",
-  "properties": {
-    "patientName": "...",
-    "phone": "...",
-    "diagnosis": "...",
-    "comment": "..."
-  }
-}
-```
+## Модель сессии
 
-The SDK applies a first filter. The Edge Function applies an independent server-side filter and discards properties not declared in the event catalog.
+### Статусы
 
-## Session model
+- `active` — heartbeat не старше 90 секунд, вкладка видима, действие было не более 60 секунд назад;
+- `idle` — heartbeat приходит, но активных действий нет;
+- `offline` — вкладка выгружена или связь временно потеряна, сессия ещё может продолжиться;
+- `closed` — logout или session timeout.
 
-### Derived status
+`pagehide` переводит browser session в `offline`, а не в `closed`, поэтому reload не закрывает её навсегда. Явный logout должен вызывать `telemetry.stop()`.
 
-- `active`: heartbeat received within 90 seconds, visible tab, and user interaction within 60 seconds;
-- `idle`: heartbeat received within 90 seconds but no recent active interaction;
-- `offline`: no current visible session; the last heartbeat can still be retained for history;
-- `closed`: explicit logout or session timeout.
+### Учёт времени
 
-### Active time
+Active time увеличивается только когда:
 
-Active time is incremented only when:
+- документ видим;
+- недавно были keyboard, pointer, touch или scroll events;
+- heartbeat принят ingestion layer;
+- event ID ещё не был обработан.
 
-- the document is visible;
-- the browser reports recent keyboard, pointer, touch or scroll activity;
-- the periodic heartbeat is emitted;
-- the event is accepted once by the idempotent ingestion layer.
+Просто открытая вкладка не считается активной работой.
 
-An open tab does not automatically count as active work.
+### Рекомендуемые значения
 
-### Recommended defaults
-
-| Setting | Value |
+| Настройка | Значение |
 |---|---:|
-| Heartbeat | 30 seconds |
-| Active threshold | 60 seconds |
-| Idle threshold | 120 seconds |
-| Offline threshold | 90 seconds since heartbeat |
-| Session timeout | 30 minutes |
-| Raw event retention | 90 days |
-| Batch size | 25 browser / 50 server |
-| Ingestion batch maximum | 100 events |
+| Heartbeat | 30 секунд |
+| Active threshold | 60 секунд |
+| Idle threshold | 120 секунд |
+| Online threshold | 90 секунд от heartbeat |
+| Session timeout | 30 минут |
+| Raw event retention | 90 дней |
+| Browser batch | 25 событий |
+| Server batch | 50 событий |
+| Ingestion maximum | 100 событий |
 
-## Host product and module owner
+## Host product и module owner
 
-A module can be displayed inside another product. Always record both dimensions.
+Модуль может отображаться внутри другого продукта. Всегда фиксируются две размерности.
 
-Example: CRM Kanban opened inside IMDS Marketing.
+Пример: CRM Kanban открыт внутри IMDS Marketing.
 
 ```ts
 telemetry.module('crm_kanban', 'CRM Kanban', 'imds-crm');
 ```
 
-The telemetry source determines the host product (`imds-marketing`). `moduleOwnerProductKey` records the owner (`imds-crm`). This prevents double counting and supports cross-product licensing and usage metering.
+Telemetry source определяет host product (`imds-marketing`), а `moduleOwnerProductKey` — владельца модуля (`imds-crm`). Это нужно для корректного usage metering, лицензирования и cross-product аналитики.
 
-## Environment setup
+## Развёртывание Supabase
 
-### Supabase Edge Function secrets
-
-Required:
+### Edge Function secrets
 
 ```text
 SUPABASE_URL
 SUPABASE_SERVICE_ROLE_KEY
 ```
 
-The service-role key is available only to the Edge Function. It must never be exposed to the Vite application or any product browser bundle.
+Service role key хранится только в Edge Function secrets и никогда не попадает в Vite, browser bundle или логи клиента.
 
-### Deploy
+### Применение схемы
+
+Примените миграции в числовом порядке и проверьте наличие версии:
+
+```text
+0020_product_analytics.sql
+```
+
+### Deploy функции
 
 ```bash
 supabase functions deploy telemetry-ingest --no-verify-jwt
 ```
 
-The function is also declared in `supabase/config.toml` with `verify_jwt = false` because product applications authenticate with source-specific ingest credentials, not a Super Admin user JWT.
+`verify_jwt = false` установлен осознанно: продукты авторизуются отдельными ingestion credentials, а не JWT пользователя Super Admin.
 
-### Apply schema
+### Scheduler
 
-Apply migrations in repository order using the normal IMDS deployment pipeline. Verify that migration `0017_product_analytics.sql` is present in the remote migration history.
-
-### Data API access
-
-The migration explicitly grants only the required columns and operations. Browser users cannot insert, update or delete telemetry tables. The write-key hash column is not granted to `authenticated`.
-
-## Background schedule
-
-Run these functions from a trusted scheduler using the service role.
-
-### Every minute
+Каждую минуту:
 
 ```sql
 select public.expire_stale_product_usage_sessions();
 ```
 
-### Daily after UTC day close
+После закрытия UTC-дня:
 
 ```sql
 select public.refresh_product_usage_rollups(current_date - 1);
 ```
 
-### Daily retention job
+Ежедневно:
 
 ```sql
 select public.purge_expired_product_usage_data();
 ```
 
-For a delayed or failed rollup, rerun `refresh_product_usage_rollups(<date>)`; it deletes and rebuilds that date idempotently.
+Rollup конкретной даты можно безопасно пересобрать повторным вызовом функции.
 
-## Creating a telemetry source
+## Создание telemetry source
 
-1. Open **Super Admin → Аналитика продуктов → Источники**.
-2. Select **Подключить продукт**.
-3. Choose the product, source type and environment.
-4. For a browser source, add exact allowed origins.
-5. Create the source.
-6. Copy the source key and write key immediately.
-7. Store a server write key in the deployment secret store.
-8. Add a browser write key to the product deployment environment as an ingestion credential.
+1. Откройте **Super Admin → Аналитика продуктов → Источники**.
+2. Нажмите **Подключить продукт**.
+3. Выберите продукт, тип источника и environment.
+4. Для browser source укажите точные origins.
+5. Создайте источник.
+6. Скопируйте source key и write key сразу.
+7. Server key сохраните в backend secret store.
+8. Browser key используйте только вместе с origin allow-list, rate limit и строгой schema validation.
 
-The database stores only the lowercase SHA-256 hash. A lost write key must be rotated; it cannot be recovered.
+База хранит только SHA-256-хэш. Потерянный ключ не восстанавливается и должен быть ротирован.
 
-### Source naming
+Рекомендуемый naming:
 
 ```text
 <product-key>-web-<environment>
 <product-key>-server-<environment>
 ```
 
-Examples:
+Примеры:
 
 ```text
 imds-marketing-web-production
@@ -246,7 +229,7 @@ imds-marketing-server-production
 imds-mis-web-staging
 ```
 
-Use separate sources for browser and server traffic and separate sources for production and staging.
+Browser/server и production/staging должны иметь разные источники.
 
 ## Browser integration
 
@@ -269,20 +252,20 @@ export const telemetry = createImdsTelemetry({
 }).start();
 ```
 
-Router hook:
+Router:
 
 ```ts
 telemetry.page(location.pathname);
 ```
 
-Module hook:
+Modules:
 
 ```ts
 telemetry.module('meta_ads', 'Meta Ads');
 telemetry.module('crm_kanban', 'CRM Kanban', 'imds-crm');
 ```
 
-Feature hook:
+Features:
 
 ```ts
 telemetry.feature('deal_moved', {
@@ -311,8 +294,6 @@ const telemetry = createImdsTelemetryNode({
 }).start();
 ```
 
-Middleware should use normalized route templates and stable error codes. Do not emit request or response data.
-
 ```ts
 app.use(telemetry.createHttpMiddleware((request) => ({
   userKey: request.user?.id,
@@ -323,118 +304,103 @@ app.use(telemetry.createHttpMiddleware((request) => ({
 })));
 ```
 
-Browser session identifiers must not be reused as server-source session identifiers. Cross-service request tracing belongs in the observability trace layer; Product Analytics records aggregated backend timing and outcomes.
+Browser session ID нельзя повторно использовать в server source: primary session identity привязана к одному telemetry source. Корреляция backend performance выполняется по product, tenant, user, route и release; distributed tracing остаётся задачей observability layer.
 
 ## Event catalog
 
-Events are rejected unless registered in `telemetry_event_definitions`.
-
-Built-in events:
-
-| Event | Category | Purpose |
+| Event | Category | Назначение |
 |---|---|---|
-| `session_started` | session | Open session |
-| `session_heartbeat` | session | Presence and active/idle delta |
-| `session_ended` | session | Explicit close |
-| `page_viewed` | navigation | Route usage |
-| `module_opened` | navigation | Module adoption |
-| `feature_used` | feature | Named feature action |
-| `entity_created` | business | Sanitized entity creation count |
-| `entity_updated` | business | Sanitized entity update count |
-| `search_performed` | feature | Search count without query text |
-| `export_started` | feature | Export attempt |
-| `export_completed` | feature | Successful export |
-| `api_request` | performance | Backend duration and status |
+| `session_started` | session | Открытие session |
+| `session_heartbeat` | session | Presence и active/idle delta |
+| `session_ended` | session | Явное закрытие |
+| `page_viewed` | navigation | Использование route |
+| `module_opened` | navigation | Adoption модуля |
+| `feature_used` | feature | Использование функции |
+| `entity_created` | business | Счётчик создания сущностей |
+| `entity_updated` | business | Счётчик изменения сущностей |
+| `search_performed` | feature | Поиск без текста запроса |
+| `export_started` | feature | Начало экспорта |
+| `export_completed` | feature | Завершение экспорта |
+| `api_request` | performance | Backend duration/status |
 | `api_error` | error | Sanitized backend error |
 | `frontend_error` | error | Sanitized browser error |
-| `permission_denied` | system | Authorization denial |
-| `subscription_limit_reached` | system | Entitlement limit reached |
+| `permission_denied` | system | Отказ авторизации |
+| `subscription_limit_reached` | system | Достигнут entitlement limit |
 
-To add an event, review it for privacy, define the allowed property keys, add it through a migration, instrument it in the product and verify the resulting dashboard row.
+Новое event name добавляется только через migration после privacy review и объявления разрешённых property keys.
 
-## Product rollout sequence
+## Порядок подключения продуктов
 
-Recommended order:
+1. IMDS Marketing browser staging.
+2. IMDS Marketing server staging.
+3. Проверка session и event schema.
+4. IMDS Marketing production.
+5. IMDS CRM.
+6. IMDS MIS.
+7. IMDS Dashboard.
+8. IMDS Finance.
+9. IMDS Contract.
+10. Остальные продукты.
 
-1. IMDS Marketing browser source.
-2. IMDS Marketing server source.
-3. IMDS CRM browser and server sources.
-4. IMDS MIS browser source.
-5. IMDS Dashboard.
-6. IMDS Finance.
-7. IMDS Contract.
-8. Remaining products.
+Для каждого продукта:
 
-For each product:
-
-1. Confirm the canonical product key in Product Registry.
-2. Confirm global user, company and branch identifiers.
-3. Create staging sources.
-4. Instrument sessions and router only.
-5. Validate online and active/idle calculations.
-6. Add 5–10 business-critical feature events.
-7. Verify no sensitive fields are emitted.
-8. Create production sources.
-9. Deploy to 5–10% of users if sampling is needed.
-10. Move to full collection after validation.
+1. Подтвердить canonical product key.
+2. Сопоставить global user, organization и branch IDs.
+3. Создать отдельные staging sources.
+4. Сначала подключить session + router.
+5. Проверить online и active/idle расчёт.
+6. Добавить 5–10 критичных feature events.
+7. Убедиться, что PHI/PII не отправляются.
+8. Создать production sources.
+9. При необходимости начать с sampling.
+10. Перейти на 100% после проверки.
 
 ## Acceptance criteria
 
-A product is considered connected when:
+Продукт считается подключённым, когда:
 
-- production browser source is active;
-- the exact production origin is allow-listed;
-- heartbeat appears within 60 seconds;
-- logout closes the session;
-- idle tabs stop accumulating active time;
-- user, organization and branch dimensions are populated;
-- host product and module owner are correct;
-- page routes contain no query strings;
-- at least five approved features are instrumented;
-- frontend and backend errors use stable codes;
-- no protected health information is visible in raw events;
-- daily rollup and retention jobs have completed successfully;
-- Super Admin filters and live-user table return the expected product.
+- production browser source активен;
+- production origin добавлен точно;
+- heartbeat виден не позднее 60 секунд;
+- reload не закрывает session;
+- logout закрывает session;
+- idle-вкладка не накапливает active time;
+- заполнены user, organization и branch dimensions;
+- host product и module owner корректны;
+- routes не содержат query strings;
+- инструментировано минимум пять approved features;
+- errors используют стабильные коды;
+- в raw events нет PHI/PII;
+- scheduler успешно выполнил expiry, rollup и retention;
+- фильтры Super Admin возвращают ожидаемый продукт.
 
-## Operational diagnostics
+## Диагностика
 
-### No events appear
+### События не поступают
 
-Check:
+Проверьте:
 
-1. source status is `active`;
-2. source key matches exactly;
-3. write key was copied before the dialog closed;
-4. browser origin matches the allow-list exactly;
-5. event name exists and is active;
-6. request is below 256 KiB and 100 events;
-7. product IDs are the control-plane UUIDs or external keys;
-8. `telemetry_ingestion_batches` contains a validation error.
+1. `telemetry_sources.status = active`;
+2. точное совпадение source key;
+3. правильный write key;
+4. точное совпадение browser origin;
+5. наличие event name в catalog;
+6. размер batch;
+7. control-plane IDs;
+8. ошибки в `telemetry_ingestion_batches`.
 
-### Online count is too high
+### Online завышен
 
-Check:
+Проверьте duplicate SDK initialization, heartbeat interval, logout `stop()`, stale-session scheduler и количество реально открытых вкладок. Каждая вкладка является отдельной browser session.
 
-- heartbeat interval;
-- duplicate SDK initialization;
-- whether logout calls `stop()`;
-- stale-session scheduler execution;
-- users opening multiple legitimate tabs. Each tab is intentionally a separate session.
+### Active time завышен
 
-### Active time is too high
+Проверьте synthetic activity events, Page Visibility API, idle timeout, duplicate event IDs и повторное создание SDK instance.
 
-Check:
+### Errors растут
 
-- activity listeners are not triggered by synthetic application loops;
-- the tab visibility API is available;
-- idle timeout has not been overridden;
-- duplicate heartbeat events are deduplicated by event ID;
-- the product is not generating new sessions repeatedly.
+Product Analytics определяет product/module/feature/release/tenant. Checkmate и tracing layer используются для поиска infrastructure и request root cause.
 
-### Elevated errors
+## Retention и backup
 
-Use Product Analytics to identify product, module, feature, release and company. Use Observability/Checkmate and the tracing layer to determine infrastructure and request root cause.
-
-## Backup and retention
-
-Raw events are retained per source, default 90 days. Daily rollups are retained for long-range reporting. Backups must follow the main control-plane backup policy. Do not extend raw retention without a documented business need and privacy review.
+Raw events хранятся по retention каждого source, по умолчанию 90 дней. Daily rollups предназначены для долгосрочной аналитики. Увеличение raw retention требует отдельного business justification и privacy review.
