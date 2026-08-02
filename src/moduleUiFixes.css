@@ -1,0 +1,294 @@
+/* Shared module UI primitives.
+   These rules are loaded last to prevent feature stylesheets from depending on
+   unrelated modules and to eliminate cross-module selector collisions. */
+
+.secondary-button {
+  width: auto;
+}
+
+.tariff-card > .secondary-button,
+.identity-card-actions .secondary-button,
+.adapter-card-actions .secondary-button,
+.registry-actions .secondary-button {
+  width: 100%;
+}
+
+.heading-actions .secondary-button,
+.panel-header .secondary-button,
+.observability-actions .secondary-button,
+.session-actions .secondary-button,
+.approval-actions .secondary-button,
+.support-footer-action .secondary-button,
+.modal-actions .secondary-button {
+  width: auto;
+}
+
+.tabs,
+.tab-bar,
+.section-tabs,
+.segmented-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  margin: 0 0 16px;
+  padding: 4px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  background: #e8efed;
+  border: 1px solid #dce7e4;
+  border-radius: 11px;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar,
+.tab-bar::-webkit-scrollbar,
+.section-tabs::-webkit-scrollbar,
+.segmented-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tabs button,
+.tab-bar button,
+.section-tabs button,
+.segmented-tabs button {
+  min-height: 36px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 12px;
+  color: #657a75;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.tabs button:hover,
+.tab-bar button:hover,
+.section-tabs button:hover,
+.segmented-tabs button:hover {
+  color: #285d55;
+  background: rgba(255, 255, 255, .55);
+}
+
+.tabs button.active,
+.tab-bar button.active,
+.section-tabs button.active,
+.segmented-tabs button.active {
+  color: #174b45;
+  background: #fff;
+  box-shadow: 0 3px 10px rgba(20, 52, 47, .08);
+}
+
+.tabs button > span,
+.tab-bar button > span,
+.section-tabs button > span,
+.segmented-tabs button > span {
+  min-width: 20px;
+  margin: 0;
+  padding: 2px 5px;
+  color: #6d807b;
+  background: #edf2f1;
+  border-radius: 999px;
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+/* Support Center */
+.support-search {
+  width: min(420px, 100%);
+}
+
+.support-customer-grid,
+.support-onboarding-grid {
+  align-items: stretch;
+}
+
+.support-customer-grid > .panel,
+.support-onboarding-grid > .panel {
+  min-width: 0;
+}
+
+.support-onboarding-grid > .panel {
+  padding-bottom: 18px;
+}
+
+.support-onboarding-grid > .panel > .health {
+  margin: 0 20px;
+}
+
+.support-onboarding-grid .onboarding-steps {
+  margin-top: 14px;
+  padding: 0 20px;
+}
+
+.support-footer-action,
+.support-toolbar {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.customer-health-head > div {
+  min-width: 0;
+}
+
+.customer-health-head h3,
+.customer-health-head span {
+  overflow-wrap: anywhere;
+}
+
+/* Data Governance */
+.governance-tabs {
+  margin-bottom: 22px;
+}
+
+.panel > .governance-list {
+  padding: 0 20px 20px;
+}
+
+.governance-list-item > div {
+  min-width: 0;
+}
+
+.governance-list-item strong,
+.governance-list-item span,
+.governance-list-item p {
+  overflow-wrap: anywhere;
+}
+
+/* Security Center */
+.approval-actions,
+.session-actions,
+.observability-actions,
+.adapter-card-actions,
+.row-actions {
+  min-width: 0;
+}
+
+.approval-actions .secondary-button,
+.session-actions .secondary-button,
+.observability-actions .secondary-button {
+  flex: 0 1 auto;
+}
+
+.security-toolbar .registry-search,
+.operations-toolbar .registry-search,
+.registry-toolbar .registry-search,
+.billing-panel .registry-search,
+.identity-toolbar .registry-search {
+  min-width: 0;
+}
+
+/* Product Analytics and Observability */
+.analytics-heading-actions,
+.observability-actions {
+  min-width: 0;
+}
+
+.analytics-product-card,
+.analytics-source-card,
+.observability-service-card,
+.observability-connection-grid > article {
+  overflow: hidden;
+}
+
+.analytics-product-card h2,
+.analytics-source-card h2,
+.observability-service-card h2,
+.observability-connection-grid h2 {
+  overflow-wrap: anywhere;
+}
+
+/* Operations and billing tables */
+.operations-panel,
+.billing-panel,
+.security-panel,
+.identity-panel,
+.company-registry-panel {
+  min-width: 0;
+}
+
+.operations-toolbar,
+.security-toolbar,
+.registry-toolbar,
+.billing-panel .billing-toolbar,
+.identity-toolbar {
+  max-width: 100%;
+}
+
+.billing-operations-metrics .metric-card > div:last-child,
+.metric-card > div:last-child {
+  min-width: 0;
+}
+
+.metric-card strong,
+.metric-card small {
+  overflow-wrap: anywhere;
+}
+
+/* Scope chips are feature-local. Avoid overriding Security Center chips. */
+.identity-table .scope-chips {
+  min-width: 160px;
+}
+
+.identity-table .scope-chips > span {
+  display: inline-flex;
+  margin: 0;
+  padding: 5px 7px;
+  color: #42645d;
+  background: #eef6f4;
+  border-radius: 7px;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .tabs,
+  .tab-bar,
+  .section-tabs,
+  .segmented-tabs {
+    width: 100%;
+  }
+
+  .support-search {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .panel > .governance-list {
+    padding-inline: 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .tabs button,
+  .tab-bar button,
+  .section-tabs button,
+  .segmented-tabs button {
+    min-height: 38px;
+    padding-inline: 11px;
+  }
+
+  .support-onboarding-grid > .panel > .health {
+    margin-inline: 15px;
+  }
+
+  .support-onboarding-grid .onboarding-steps {
+    padding-inline: 15px;
+  }
+
+  .support-footer-action > button,
+  .support-toolbar > button {
+    width: 100%;
+  }
+
+  .heading-actions .secondary-button,
+  .modal-actions .secondary-button {
+    width: 100%;
+  }
+}
