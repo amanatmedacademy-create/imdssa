@@ -9,10 +9,11 @@
   "scripts": {
     "dev": "vite",
     "validate:env": "node scripts/validate-build-env.mjs",
+    "validate:repository": "node scripts/validate-repository.mjs",
     "lint": "tsc --noEmit",
     "build": "npm run validate:env && tsc -b && vite build",
     "build:production": "IMDS_STRICT_ENV=true VITE_APP_ENV=production npm run build",
-    "check": "npm run lint && npm run build",
+    "check": "npm run validate:repository && npm run lint && npm run build",
     "preview": "vite preview"
   },
   "dependencies": {
