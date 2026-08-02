@@ -9,8 +9,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "dist",
-    "skipLibCheck": true,
-    "noUncheckedIndexedAccess": true
+    "skipLibCheck": true
   },
   "include": ["src"]
 }
