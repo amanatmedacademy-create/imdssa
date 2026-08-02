@@ -6,6 +6,7 @@ import { AuthGate } from './core/AuthGate';
 import { AuthProvider } from './core/auth';
 import { BillingProvider } from './features/billing/BillingContext';
 import { IdentityProvider } from './features/identity/IdentityContext';
+import { ObservabilityProvider } from './features/observability/ObservabilityContext';
 import { OperationsProvider } from './features/operations/OperationsContext';
 import { ProductCatalogProvider } from './features/products/ProductCatalogContext';
 import { SecurityProvider } from './features/security/SecurityContext';
@@ -16,6 +17,7 @@ import './productCatalog.css';
 import './billing.css';
 import './operations.css';
 import './security.css';
+import './observability.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -27,7 +29,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <IdentityProvider>
                 <OperationsProvider>
                   <SecurityProvider>
-                    <App />
+                    <ObservabilityProvider>
+                      <App />
+                    </ObservabilityProvider>
                   </SecurityProvider>
                 </OperationsProvider>
               </IdentityProvider>

@@ -9,6 +9,7 @@ import {
   ChevronRight,
   CircleDollarSign,
   CloudCog,
+  Gauge,
   Headphones,
   KeyRound,
   LayoutDashboard,
@@ -32,6 +33,7 @@ import { roleLabels } from './core/permissions';
 import { useBilling } from './features/billing/BillingContext';
 import { SubscriptionsPage } from './features/billing/SubscriptionsPage';
 import { IdentityDirectoryPage } from './features/identity/IdentityDirectoryPage';
+import { ObservabilityPage } from './features/observability/ObservabilityPage';
 import { CompaniesPage } from './features/organizations/CompaniesPage';
 import { OperationsPage } from './features/operations/OperationsPage';
 import { useProductCatalog } from './features/products/ProductCatalogContext';
@@ -56,6 +58,7 @@ const nav: NavigationItem[] = [
   { to: '/users', label: 'Пользователи', icon: Users, permission: 'users.read' },
   { to: '/integrations', label: 'Интеграции', icon: Network, permission: 'integrations.read' },
   { to: '/operations', label: 'Операции', icon: Activity, permission: 'operations.read' },
+  { to: '/observability', label: 'Мониторинг', icon: Gauge, permission: 'observability.read' },
   { to: '/security', label: 'Безопасность', icon: ShieldCheck, permission: 'security.read' },
   { to: '/support', label: 'Поддержка', icon: Headphones, permission: 'support.read' },
   { to: '/settings', label: 'Настройки', icon: Settings, permission: 'settings.read' },
@@ -194,7 +197,7 @@ function Dashboard() {
         <article className="panel">
           <div className="panel-header"><div><h2>Операционный контроль</h2><p>Требует внимания</p></div></div>
           <div className="alerts">
-            <div className="alert critical"><AlertTriangle size={18} /><div><strong>Meta Ads API</strong><span>Повышенный процент ошибок: 8,4%</span></div></div>
+            <NavLink className="alert critical" to="/observability"><AlertTriangle size={18} /><div><strong>Meta Ads API</strong><span>Повышенный процент ошибок: 8,4%</span></div></NavLink>
             <NavLink className="alert" to="/security"><ShieldAlert size={18} /><div><strong>{pendingApprovals} заявок на согласование</strong><span>{activePrivilegedSessions} привилегированных сессий активны</span></div></NavLink>
             <div className="alert"><Webhook size={18} /><div><strong>12 failed webhooks</strong><span>Ожидают повторной обработки</span></div></div>
             <div className="alert"><BadgeDollarSign size={18} /><div><strong>{subscriptions.filter((subscription) => ['past_due', 'grace_period'].includes(subscription.status)).length} проблемных подписок</strong><span>Требуют проверки оплаты</span></div></div>
@@ -210,7 +213,7 @@ function Dashboard() {
             <NavLink to="/companies"><Building2 size={18} /><span><strong>Новая компания</strong><small>Создать tenant и владельца</small></span></NavLink>
             <NavLink to="/subscriptions"><PackageCheck size={18} /><span><strong>Выдать лицензию</strong><small>Активировать тариф и продукты</small></span></NavLink>
             <NavLink to="/security"><LockKeyhole size={18} /><span><strong>Support session</strong><small>Запросить согласованный вход от имени клиента</small></span></NavLink>
-            <NavLink to="/operations"><CloudCog size={18} /><span><strong>Incident mode</strong><small>Ограничить проблемный сервис</small></span></NavLink>
+            <NavLink to="/observability"><CloudCog size={18} /><span><strong>Incident Center</strong><small>Проверить сервисы и активные инциденты</small></span></NavLink>
           </div>
         </article>
       </section>
@@ -233,6 +236,7 @@ export function App() {
         <Route path="/users" element={<RequirePermission permission="users.read"><IdentityDirectoryPage /></RequirePermission>} />
         <Route path="/integrations" element={<RequirePermission permission="integrations.read"><Placeholder title="Интеграции" description="API-адаптеры, webhooks, секреты, токены и фоновые синхронизации." icon={Network} /></RequirePermission>} />
         <Route path="/operations" element={<RequirePermission permission="operations.read"><OperationsPage /></RequirePermission>} />
+        <Route path="/observability" element={<RequirePermission permission="observability.read"><ObservabilityPage /></RequirePermission>} />
         <Route path="/security" element={<RequirePermission permission="security.read"><SecurityCenterPage /></RequirePermission>} />
         <Route path="/audit" element={<RequirePermission permission="security.read"><SecurityCenterPage /></RequirePermission>} />
         <Route path="/support" element={<RequirePermission permission="support.read"><Placeholder title="Customer Success и Support" description="Онбординг, обращения, SLA, диагностика и health score." icon={LifeBuoy} /></RequirePermission>} />
