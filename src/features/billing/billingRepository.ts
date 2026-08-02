@@ -130,6 +130,49 @@ const demoOrganizations: BillingOrganization[] = [
   { id: 'org-nova', name: 'Nova Health', status: 'onboarding' },
 ];
 
+function createDemoSubscription(
+  id: string,
+  organizationId: string,
+  organizationName: string,
+  tariffId: string,
+  tariffName: string,
+  status: SubscriptionStatus,
+  productIds: string[],
+): Subscription {
+  const startsAt = status === 'trial' ? '2026-07-28T10:00:00.000Z' : '2026-07-01T10:00:00.000Z';
+  return {
+    id,
+    organizationId,
+    organizationName,
+    tariffId,
+    tariffName,
+    status,
+    billingInterval: 'monthly',
+    renewalMode: 'manual',
+    startsAt,
+    trialEndsAt: status === 'trial' ? '2026-08-11T10:00:00.000Z' : null,
+    periodEndsAt: '2026-08-31T10:00:00.000Z',
+    graceEndsAt: status === 'past_due' ? '2026-08-08T10:00:00.000Z' : null,
+    cancelledAt: null,
+    customPrice: null,
+    effectivePrice: 0,
+    currency: 'KZT',
+    activatedAt: status === 'active' || status === 'past_due' ? startsAt : null,
+    licenses: productIds.map((productId) => ({
+      id: `license-${organizationId}-${productId}`,
+      productId,
+      productName: demoProducts.find((product) => product.id === productId)?.name ?? productId,
+      status: status === 'trial' ? 'pending' : 'active',
+      externalTenantId: status === 'trial' ? null : `${organizationId}:${productId}`,
+      activatedAt: status === 'trial' ? null : startsAt,
+      expiresAt: '2026-08-31T10:00:00.000Z',
+      entitlements: [],
+    })),
+    createdAt: startsAt,
+    updatedAt: DEMO_DATE,
+  };
+}
+
 const defaultSnapshot: BillingSnapshot = {
   products: demoProducts,
   organizations: demoOrganizations,
@@ -192,49 +235,6 @@ const defaultSnapshot: BillingSnapshot = {
     createDemoSubscription('subscription-sapa', 'org-sapa', 'Sapa Med', 'tariff-business', 'Business', 'past_due', ['crm', 'marketing', 'dashboard']),
   ],
 };
-
-function createDemoSubscription(
-  id: string,
-  organizationId: string,
-  organizationName: string,
-  tariffId: string,
-  tariffName: string,
-  status: SubscriptionStatus,
-  productIds: string[],
-): Subscription {
-  const startsAt = status === 'trial' ? '2026-07-28T10:00:00.000Z' : '2026-07-01T10:00:00.000Z';
-  return {
-    id,
-    organizationId,
-    organizationName,
-    tariffId,
-    tariffName,
-    status,
-    billingInterval: 'monthly',
-    renewalMode: 'manual',
-    startsAt,
-    trialEndsAt: status === 'trial' ? '2026-08-11T10:00:00.000Z' : null,
-    periodEndsAt: '2026-08-31T10:00:00.000Z',
-    graceEndsAt: status === 'past_due' ? '2026-08-08T10:00:00.000Z' : null,
-    cancelledAt: null,
-    customPrice: null,
-    effectivePrice: 0,
-    currency: 'KZT',
-    activatedAt: status === 'active' || status === 'past_due' ? startsAt : null,
-    licenses: productIds.map((productId) => ({
-      id: `license-${organizationId}-${productId}`,
-      productId,
-      productName: demoProducts.find((product) => product.id === productId)?.name ?? productId,
-      status: status === 'trial' ? 'pending' : 'active',
-      externalTenantId: status === 'trial' ? null : `${organizationId}:${productId}`,
-      activatedAt: status === 'trial' ? null : startsAt,
-      expiresAt: '2026-08-31T10:00:00.000Z',
-      entitlements: [],
-    })),
-    createdAt: startsAt,
-    updatedAt: DEMO_DATE,
-  };
-}
 
 function getBillingClient(): BillingSupabaseClient | null {
   return getSupabase() as unknown as BillingSupabaseClient | null;
@@ -307,12 +307,20 @@ async function listFromSupabase(): Promise<BillingSnapshot> {
     ?? productResult.error;
   if (firstError) throw firstError;
 
-  const organizations: BillingOrganization[] = organizationResult.data.map((organization) => ({
+  const tariffRows = tariffResult.data ?? [];
+  const tariffProductRows = tariffProductResult.data ?? [];
+  const subscriptionRows = subscriptionResult.data ?? [];
+  const licenseRows = licenseResult.data ?? [];
+  const entitlementRows = entitlementResult.data ?? [];
+  const organizationRows = organizationResult.data ?? [];
+  const productRows = productResult.data ?? [];
+
+  const organizations: BillingOrganization[] = organizationRows.map((organization) => ({
     id: organization.id,
     name: organization.name,
     status: organization.status,
   }));
-  const products: BillingProduct[] = productResult.data.map((product) => ({
+  const products: BillingProduct[] = productRows.map((product) => ({
     id: product.id,
     key: product.key,
     name: product.name,
@@ -321,7 +329,7 @@ async function listFromSupabase(): Promise<BillingSnapshot> {
   const productNameById = new Map(products.map((product) => [product.id, product.name]));
   const organizationNameById = new Map(organizations.map((organization) => [organization.id, organization.name]));
 
-  const tariffs: Tariff[] = tariffResult.data.map((tariff) => ({
+  const tariffs: Tariff[] = tariffRows.map((tariff) => ({
     id: tariff.id,
     code: tariff.code,
     name: tariff.name,
@@ -334,7 +342,7 @@ async function listFromSupabase(): Promise<BillingSnapshot> {
     isCustom: tariff.is_custom,
     isActive: tariff.is_active,
     archivedAt: tariff.archived_at,
-    productIds: tariffProductResult.data
+    productIds: tariffProductRows
       .filter((item) => item.tariff_id === tariff.id && item.included)
       .map((item) => item.product_id),
     createdAt: tariff.created_at,
@@ -342,9 +350,11 @@ async function listFromSupabase(): Promise<BillingSnapshot> {
   }));
   const tariffById = new Map(tariffs.map((tariff) => [tariff.id, tariff]));
 
-  const subscriptions: Subscription[] = subscriptionResult.data.map((subscription) => {
+  const subscriptions: Subscription[] = subscriptionRows.map((subscription) => {
     const tariff = subscription.tariff_id ? tariffById.get(subscription.tariff_id) : undefined;
-    const subscriptionLicenses = licenseResult.data
+    const metadataTariffName = getJsonString(subscription.metadata, 'tariff_name');
+    const metadataCurrency = getJsonString(subscription.metadata, 'currency');
+    const subscriptionLicenses = licenseRows
       .filter((license) => license.subscription_id === subscription.id)
       .map((license): License => ({
         id: license.id,
@@ -354,7 +364,7 @@ async function listFromSupabase(): Promise<BillingSnapshot> {
         externalTenantId: license.external_tenant_id,
         activatedAt: license.activated_at,
         expiresAt: license.expires_at,
-        entitlements: entitlementResult.data
+        entitlements: entitlementRows
           .filter((entitlement) => entitlement.license_id === license.id)
           .map((entitlement) => ({
             id: entitlement.id,
@@ -374,7 +384,7 @@ async function listFromSupabase(): Promise<BillingSnapshot> {
       organizationId: subscription.organization_id,
       organizationName: organizationNameById.get(subscription.organization_id) ?? subscription.organization_id,
       tariffId: subscription.tariff_id,
-      tariffName: tariff?.name ?? getJsonString(subscription.metadata, 'tariff_name') || 'Индивидуальный',
+      tariffName: tariff?.name ?? (metadataTariffName || 'Индивидуальный'),
       status: subscription.status,
       billingInterval: subscription.billing_interval,
       renewalMode: subscription.renewal_mode,
@@ -385,7 +395,7 @@ async function listFromSupabase(): Promise<BillingSnapshot> {
       cancelledAt: subscription.cancelled_at,
       customPrice: subscription.custom_price === null ? null : Number(subscription.custom_price),
       effectivePrice,
-      currency: tariff?.currency ?? getJsonString(subscription.metadata, 'currency') || 'KZT',
+      currency: tariff?.currency ?? (metadataCurrency || 'KZT'),
       activatedAt: subscription.activated_at,
       licenses: subscriptionLicenses,
       createdAt: subscription.created_at,
