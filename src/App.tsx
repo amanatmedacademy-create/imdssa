@@ -13,7 +13,6 @@ import {
   Headphones,
   KeyRound,
   LayoutDashboard,
-  LifeBuoy,
   LockKeyhole,
   LogOut,
   Network,
@@ -41,6 +40,7 @@ import { ProductsPage } from './features/products/ProductsPage';
 import type { ManagedProduct } from './features/products/productRepository';
 import { SecurityCenterPage } from './features/security/SecurityCenterPage';
 import { useSecurity } from './features/security/SecurityContext';
+import { SupportPage } from './features/support/SupportPage';
 import { env } from './lib/env';
 
 type NavigationItem = {
@@ -86,16 +86,12 @@ function Shell({ children }: { children: React.ReactNode }) {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">I</div>
-          <div>
-            <strong>IMDS</strong>
-            <span>Super Admin</span>
-          </div>
+          <div><strong>IMDS</strong><span>Super Admin</span></div>
         </div>
         <nav>
           {visibleNavigation.map(({ to, label, icon: Icon }) => (
             <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => (isActive ? 'nav-item active' : 'nav-item')}>
-              <Icon size={18} />
-              <span>{label}</span>
+              <Icon size={18} /><span>{label}</span>
             </NavLink>
           ))}
         </nav>
@@ -124,11 +120,8 @@ function RequirePermission({ permission, children }: { permission: Permission; c
   if (can(permission)) return <>{children}</>;
   return (
     <div className="access-denied">
-      <div><ShieldAlert size={34} /></div>
-      <span className="eyebrow">RBAC</span>
-      <h1>Недостаточно прав</h1>
-      <p>Текущая глобальная роль не разрешает открывать этот раздел.</p>
-      <NavLink className="primary-button" to="/">Вернуться на обзор</NavLink>
+      <div><ShieldAlert size={34} /></div><span className="eyebrow">RBAC</span><h1>Недостаточно прав</h1>
+      <p>Текущая глобальная роль не разрешает открывать этот раздел.</p><NavLink className="primary-button" to="/">Вернуться на обзор</NavLink>
     </div>
   );
 }
@@ -138,25 +131,13 @@ function Metric({ icon: Icon, label, value, note }: { icon: React.ElementType; l
 }
 
 function StatusBadge({ value }: { value: ManagedProduct['status'] }) {
-  const label = value === 'active'
-    ? 'Работает'
-    : value === 'degraded'
-      ? 'Деградация'
-      : value === 'maintenance'
-        ? 'Техработы'
-        : value === 'disabled'
-          ? 'Отключён'
-          : 'Настройка';
+  const label = value === 'active' ? 'Работает' : value === 'degraded' ? 'Деградация' : value === 'maintenance' ? 'Техработы' : value === 'disabled' ? 'Отключён' : 'Настройка';
   const className = value === 'active' ? 'ok' : value === 'degraded' || value === 'maintenance' ? 'warn' : 'muted';
   return <span className={`status ${className}`}>{label}</span>;
 }
 
 function formatKzt(value: number) {
-  return new Intl.NumberFormat('ru-RU', {
-    style: 'currency',
-    currency: 'KZT',
-    maximumFractionDigits: 0,
-  }).format(value);
+  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', maximumFractionDigits: 0 }).format(value);
 }
 
 function Dashboard() {
@@ -165,13 +146,8 @@ function Dashboard() {
   const { subscriptions, loading: billingLoading, error: billingError } = useBilling();
   const { requests: securityRequests, sessions: securitySessions, error: securityError } = useSecurity();
   const activeProducts = products.filter((product) => !product.archivedAt);
-  const activeLicenses = subscriptions.reduce(
-    (sum, subscription) => sum + subscription.licenses.filter((license) => license.status !== 'revoked').length,
-    0,
-  );
-  const mrr = subscriptions
-    .filter((subscription) => subscription.status === 'active')
-    .reduce((sum, subscription) => sum + (subscription.billingInterval === 'annual' ? subscription.effectivePrice / 12 : subscription.billingInterval === 'monthly' ? subscription.effectivePrice : 0), 0);
+  const activeLicenses = subscriptions.reduce((sum, subscription) => sum + subscription.licenses.filter((license) => license.status !== 'revoked').length, 0);
+  const mrr = subscriptions.filter((subscription) => subscription.status === 'active').reduce((sum, subscription) => sum + (subscription.billingInterval === 'annual' ? subscription.effectivePrice / 12 : subscription.billingInterval === 'monthly' ? subscription.effectivePrice : 0), 0);
   const pendingApprovals = securityRequests.filter((request) => request.status === 'pending').length;
   const activePrivilegedSessions = securitySessions.filter((session) => session.status === 'active').length;
 
@@ -239,7 +215,7 @@ export function App() {
         <Route path="/observability" element={<RequirePermission permission="observability.read"><ObservabilityPage /></RequirePermission>} />
         <Route path="/security" element={<RequirePermission permission="security.read"><SecurityCenterPage /></RequirePermission>} />
         <Route path="/audit" element={<RequirePermission permission="security.read"><SecurityCenterPage /></RequirePermission>} />
-        <Route path="/support" element={<RequirePermission permission="support.read"><Placeholder title="Customer Success и Support" description="Онбординг, обращения, SLA, диагностика и health score." icon={LifeBuoy} /></RequirePermission>} />
+        <Route path="/support" element={<RequirePermission permission="support.read"><SupportPage /></RequirePermission>} />
         <Route path="/settings" element={<RequirePermission permission="settings.read"><Placeholder title="Настройки платформы" description="Роли, feature flags, окружения, уведомления и политики хранения." icon={Settings} /></RequirePermission>} />
       </Routes>
     </Shell>
