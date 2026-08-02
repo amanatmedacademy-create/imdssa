@@ -8,6 +8,8 @@ export type Permission =
   | 'organizations.archive'
   | 'products.read'
   | 'products.manage'
+  | 'modules.read'
+  | 'modules.manage'
   | 'subscriptions.read'
   | 'subscriptions.manage'
   | 'billing.operations.read'
@@ -38,7 +40,7 @@ export type Permission =
 
 const allPermissions: Permission[] = [
   'dashboard.read','organizations.read','organizations.create','organizations.update','organizations.archive',
-  'products.read','products.manage','subscriptions.read','subscriptions.manage',
+  'products.read','products.manage','modules.read','modules.manage','subscriptions.read','subscriptions.manage',
   'billing.operations.read','billing.operations.manage','users.read','users.manage',
   'integrations.read','integrations.manage','operations.read','operations.manage',
   'observability.read','observability.manage','analytics.read','analytics.manage',
@@ -51,29 +53,29 @@ const rolePermissions: Record<GlobalRole, ReadonlySet<Permission>> = {
   platform_owner: new Set(allPermissions),
   super_admin: new Set(allPermissions),
   support_admin: new Set([
-    'dashboard.read','organizations.read','products.read','subscriptions.read','billing.operations.read',
+    'dashboard.read','organizations.read','products.read','modules.read','subscriptions.read','billing.operations.read',
     'users.read','integrations.read','operations.read','observability.read','analytics.read',
     'security.read','security.request','audit.read','support.read','support.manage','governance.read','impersonation.start',
   ]),
   finance_admin: new Set([
-    'dashboard.read','organizations.read','products.read','subscriptions.read','subscriptions.manage',
+    'dashboard.read','organizations.read','products.read','modules.read','subscriptions.read','subscriptions.manage',
     'billing.operations.read','billing.operations.manage','observability.read','security.read','security.request',
     'approvals.review','audit.read','support.read','governance.read',
   ]),
   technical_admin: new Set([
-    'dashboard.read','organizations.read','products.read','products.manage','subscriptions.read',
+    'dashboard.read','organizations.read','products.read','products.manage','modules.read','modules.manage','subscriptions.read',
     'billing.operations.read','integrations.read','integrations.manage','operations.read','operations.manage',
     'observability.read','observability.manage','analytics.read','analytics.manage',
     'security.read','security.request','audit.read','support.read','support.manage',
     'governance.read','governance.manage','settings.read',
   ]),
   sales_manager: new Set([
-    'dashboard.read','organizations.read','organizations.create','organizations.update','products.read',
+    'dashboard.read','organizations.read','organizations.create','organizations.update','products.read','modules.read',
     'subscriptions.read','billing.operations.read','observability.read','support.read','support.manage',
     'governance.read',
   ]),
   auditor: new Set([
-    'dashboard.read','organizations.read','products.read','subscriptions.read','billing.operations.read',
+    'dashboard.read','organizations.read','products.read','modules.read','subscriptions.read','billing.operations.read',
     'users.read','integrations.read','operations.read','observability.read','analytics.read','security.read',
     'audit.read','audit.verify','support.read','governance.read','settings.read',
   ]),
