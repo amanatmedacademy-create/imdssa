@@ -20,6 +20,7 @@ import './controlPlane.css';
 import './productCatalog.css';
 import './billing.css';
 import './billingOperations.css';
+import './identity.css';
 import './operations.css';
 import './security.css';
 import './observability.css';
