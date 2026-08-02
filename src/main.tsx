@@ -4,11 +4,13 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 import { AuthGate } from './core/AuthGate';
 import { AuthProvider } from './core/auth';
+import { BillingProvider } from './features/billing/BillingContext';
 import { ProductCatalogProvider } from './features/products/ProductCatalogContext';
 import './styles.css';
 import './productRegistry.css';
 import './controlPlane.css';
 import './productCatalog.css';
+import './billing.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -16,7 +18,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <AuthProvider>
         <AuthGate>
           <ProductCatalogProvider>
-            <App />
+            <BillingProvider>
+              <App />
+            </BillingProvider>
           </ProductCatalogProvider>
         </AuthGate>
       </AuthProvider>
