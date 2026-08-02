@@ -18,6 +18,7 @@
     "build": "npm run validate:env && tsc -b && vite build",
     "build:production": "IMDS_STRICT_ENV=true VITE_APP_ENV=production npm run build",
     "check": "npm run validate:repository && npm run lint && npm run build",
+    "test:e2e:crm-kanban": "node tests/crm-kanban-e2e.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
