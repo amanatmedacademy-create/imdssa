@@ -28,7 +28,7 @@ const EVENT_PATTERN = /^[a-z][a-z0-9_]{1,79}$/;
 const MAX_REQUEST_BYTES = 262_144;
 const MAX_BATCH_EVENTS = 100;
 const MAX_REQUESTS_PER_MINUTE = 240;
-const FUNCTION_VERSION = '1.0.0';
+const FUNCTION_VERSION = '1.0.1';
 
 const BLOCKED_PROPERTY_KEYS = [
   /password/i,
@@ -452,16 +452,20 @@ Deno.serve(async (request) => {
     const safeMessage = error instanceof Error ? error.message.slice(0, 500) : 'Unexpected telemetry ingestion failure';
 
     if (source) {
-      await admin.rpc('record_failed_telemetry_batch', {
-        target_source_id: source.id,
-        request_id_value: requestId,
-        origin_value: normalizedRequestOrigin,
-        sdk_version_value: requestSdkVersion,
-        event_count_value: rawEventCount,
-        processing_ms_value: processingMs,
-        errors_value: [{ message: safeMessage }],
-        request_metadata_value: { functionVersion: FUNCTION_VERSION, reason: 'ingestion_failed' },
-      }).catch(() => undefined);
+      try {
+        await admin.rpc('record_failed_telemetry_batch', {
+          target_source_id: source.id,
+          request_id_value: requestId,
+          origin_value: normalizedRequestOrigin,
+          sdk_version_value: requestSdkVersion,
+          event_count_value: rawEventCount,
+          processing_ms_value: processingMs,
+          errors_value: [{ message: safeMessage }],
+          request_metadata_value: { functionVersion: FUNCTION_VERSION, reason: 'ingestion_failed' },
+        });
+      } catch {
+        // Best effort only: the original ingestion failure must still return a stable JSON response.
+      }
     }
 
     return jsonResponse({ error: 'Telemetry ingestion failed.', requestId }, 500, requestOrigin);
