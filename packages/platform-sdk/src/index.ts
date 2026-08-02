@@ -4,7 +4,7 @@ import type {
   AuthorizeInput,
   AuthorizeResult,
   BootstrapResponse,
-} from '../../platform-types/src/index';
+} from '@imds/platform-types';
 
 export class PlatformApiError extends Error {
   constructor(
