@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
+import { AppErrorBoundary } from './core/AppErrorBoundary';
 import { AuthGate } from './core/AuthGate';
 import { AuthProvider } from './core/auth';
 import { ProductAnalyticsProvider } from './features/analytics/ProductAnalyticsContext';
@@ -30,32 +31,34 @@ import './governance.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <AuthProvider>
-        <AuthGate>
-          <ProductCatalogProvider>
-            <BillingProvider>
-              <BillingOperationsProvider>
-                <IdentityProvider>
-                  <OperationsProvider>
-                    <SecurityProvider>
-                      <ObservabilityProvider>
-                        <ProductAnalyticsProvider>
-                          <SupportProvider>
-                            <GovernanceProvider>
-                              <App />
-                            </GovernanceProvider>
-                          </SupportProvider>
-                        </ProductAnalyticsProvider>
-                      </ObservabilityProvider>
-                    </SecurityProvider>
-                  </OperationsProvider>
-                </IdentityProvider>
-              </BillingOperationsProvider>
-            </BillingProvider>
-          </ProductCatalogProvider>
-        </AuthGate>
-      </AuthProvider>
-    </BrowserRouter>
+    <AppErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <AuthGate>
+            <ProductCatalogProvider>
+              <BillingProvider>
+                <BillingOperationsProvider>
+                  <IdentityProvider>
+                    <OperationsProvider>
+                      <SecurityProvider>
+                        <ObservabilityProvider>
+                          <ProductAnalyticsProvider>
+                            <SupportProvider>
+                              <GovernanceProvider>
+                                <App />
+                              </GovernanceProvider>
+                            </SupportProvider>
+                          </ProductAnalyticsProvider>
+                        </ObservabilityProvider>
+                      </SecurityProvider>
+                    </OperationsProvider>
+                  </IdentityProvider>
+                </BillingOperationsProvider>
+              </BillingProvider>
+            </ProductCatalogProvider>
+          </AuthGate>
+        </AuthProvider>
+      </BrowserRouter>
+    </AppErrorBoundary>
   </React.StrictMode>,
 );
