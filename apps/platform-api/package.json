@@ -1,0 +1,13 @@
+{
+  "name": "@imds/platform-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "lint": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@imds/platform-types": "0.1.0"
+  }
+}

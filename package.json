@@ -1,8 +1,12 @@
 {
-  "name": "imds-super-admin",
+  "name": "imds-platform-control-plane",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "engines": {
     "node": ">=22 <23"
   },
