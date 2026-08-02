@@ -26,27 +26,7 @@ import {
   Webhook,
 } from 'lucide-react';
 import { NavLink, Route, Routes } from 'react-router-dom';
-
-type Product = {
-  name: string;
-  status: 'Работает' | 'Деградация' | 'Настройка';
-  tenants: number;
-  version: string;
-};
-
-const products: Product[] = [
-  { name: 'IMDS MIS', status: 'Работает', tenants: 42, version: '3.8.4' },
-  { name: 'IMDS CRM', status: 'Работает', tenants: 56, version: '2.4.1' },
-  { name: 'IMDS Marketing', status: 'Деградация', tenants: 31, version: '1.9.6' },
-  { name: 'IMDS Finance', status: 'Работает', tenants: 19, version: '1.3.0' },
-  { name: 'IMDS Contract', status: 'Работает', tenants: 24, version: '1.6.2' },
-  { name: 'IMDS Dashboard', status: 'Работает', tenants: 47, version: '2.2.8' },
-  { name: 'IMDS Product 7', status: 'Настройка', tenants: 0, version: '0.1.0' },
-  { name: 'IMDS Product 8', status: 'Настройка', tenants: 0, version: '0.1.0' },
-  { name: 'IMDS Product 9', status: 'Настройка', tenants: 0, version: '0.1.0' },
-  { name: 'IMDS Product 10', status: 'Настройка', tenants: 0, version: '0.1.0' },
-  { name: 'IMDS Product 11', status: 'Настройка', tenants: 0, version: '0.1.0' },
-];
+import { Product, ProductRegistryPage, useProductRegistry } from './productRegistry';
 
 const nav = [
   { to: '/', label: 'Обзор', icon: LayoutDashboard },
@@ -89,7 +69,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         </nav>
         <div className="sidebar-footer">
           <div className="environment"><span /> Production</div>
-          <small>Control plane v0.1.0</small>
+          <small>Control plane v0.2.0</small>
         </div>
       </aside>
       <main className="main">
@@ -114,21 +94,23 @@ function StatusBadge({ value }: { value: Product['status'] }) {
   return <span className={`status ${value === 'Работает' ? 'ok' : value === 'Деградация' ? 'warn' : 'muted'}`}>{value}</span>;
 }
 
-function Dashboard() {
+function Dashboard({ products }: { products: Product[] }) {
+  const activeProducts = products.filter((product) => !product.archivedAt);
+
   return (
     <>
       <div className="page-heading"><div><span className="eyebrow">Платформа</span><h1>Центр управления IMDS</h1><p>Компании, продукты, лицензии, инфраструктура и операционный контроль.</p></div><button className="primary-button"><Building2 size={17} /> Создать компанию</button></div>
       <section className="metrics">
         <Metric icon={Building2} label="Активные компании" value="68" note="+6 за 30 дней" />
         <Metric icon={Users} label="Пользователи" value="1 284" note="1 042 активны" />
-        <Metric icon={PackageCheck} label="Активные лицензии" value="219" note="11 продуктов" />
+        <Metric icon={PackageCheck} label="Активные лицензии" value="219" note={`${activeProducts.length} продуктов в реестре`} />
         <Metric icon={CircleDollarSign} label="MRR" value="₸ 18,4 млн" note="+12,6% к прошлому месяцу" />
       </section>
       <section className="content-grid">
         <article className="panel span-2">
           <div className="panel-header"><div><h2>Состояние продуктов</h2><p>Версии, tenants и доступность сервисов</p></div><NavLink to="/products">Все продукты <ChevronRight size={16} /></NavLink></div>
           <div className="product-grid">
-            {products.slice(0, 6).map((product) => <div className="product-card" key={product.name}><div className="product-symbol"><AppWindow size={20} /></div><div className="product-info"><strong>{product.name}</strong><span>{product.tenants} компаний · v{product.version}</span></div><StatusBadge value={product.status} /></div>)}
+            {activeProducts.slice(0, 6).map((product) => <div className="product-card" key={product.id}><div className="product-symbol"><AppWindow size={20} /></div><div className="product-info"><strong>{product.name}</strong><span>{product.tenants} компаний · v{product.version}</span></div><StatusBadge value={product.status} /></div>)}
           </div>
         </article>
         <article className="panel">
@@ -158,14 +140,12 @@ function Dashboard() {
   );
 }
 
-function ProductsPage() {
-  return <><div className="page-heading"><div><span className="eyebrow">Product Registry</span><h1>Продукты IMDS</h1><p>Версии, доступность, API-адаптеры и лицензирование.</p></div><button className="primary-button"><Boxes size={17} /> Добавить продукт</button></div><div className="registry-grid">{products.map((p, i) => <article className="registry-card" key={p.name}><div className="registry-top"><div className="product-symbol large"><AppWindow size={22} /></div><StatusBadge value={p.status} /></div><h3>{p.name}</h3><p>{i < 6 ? 'Подключён к управляющему контуру' : 'Требуется зафиксировать официальное название и API-контракт'}</p><dl><div><dt>Tenants</dt><dd>{p.tenants}</dd></div><div><dt>Версия</dt><dd>{p.version}</dd></div><div><dt>Health</dt><dd>{p.status === 'Работает' ? '99.98%' : p.status === 'Деградация' ? '96.12%' : '—'}</dd></div></dl><button className="secondary-button">Открыть конфигурацию</button></article>)}</div></>;
-}
-
 function Placeholder({ title, description, icon: Icon }: { title: string; description: string; icon: React.ElementType }) {
   return <><div className="page-heading"><div><span className="eyebrow">IMDS Control Plane</span><h1>{title}</h1><p>{description}</p></div></div><div className="empty-state"><div><Icon size={34} /></div><h2>Раздел подготовлен в архитектуре</h2><p>Следующий этап — подключение Supabase, RLS, API-команд и реальных данных.</p><button className="primary-button"><SlidersHorizontal size={17} /> Настроить модуль</button></div></>;
 }
 
 export function App() {
-  return <Shell><Routes><Route path="/" element={<Dashboard />} /><Route path="/products" element={<ProductsPage />} /><Route path="/companies" element={<Placeholder title="Компании и tenants" description="Холдинги, юридические лица, филиалы, владельцы и статусы доступа." icon={Building2} />} /><Route path="/subscriptions" element={<Placeholder title="Тарифы и подписки" description="Лицензии, счета, платежи, grace period и лимиты использования." icon={BadgeDollarSign} />} /><Route path="/users" element={<Placeholder title="Identity Directory" description="Единый каталог пользователей, ролей, продуктов и филиалов." icon={Users} />} /><Route path="/integrations" element={<Placeholder title="Интеграции" description="API-адаптеры, webhooks, секреты, токены и фоновые синхронизации." icon={Network} />} /><Route path="/operations" element={<Placeholder title="Operations Center" description="Мониторинг, очереди, релизы, incidents и command center." icon={Gauge} />} /><Route path="/audit" element={<Placeholder title="Аудит и безопасность" description="Неизменяемый журнал действий, approvals и break-glass access." icon={FileCheck2} />} /><Route path="/support" element={<Placeholder title="Customer Success и Support" description="Онбординг, обращения, SLA, диагностика и health score." icon={LifeBuoy} />} /><Route path="/settings" element={<Placeholder title="Настройки платформы" description="Роли, feature flags, окружения, уведомления и политики хранения." icon={Settings} />} /></Routes></Shell>;
+  const { products, setProducts } = useProductRegistry();
+
+  return <Shell><Routes><Route path="/" element={<Dashboard products={products} />} /><Route path="/products" element={<ProductRegistryPage products={products} onChange={setProducts} />} /><Route path="/companies" element={<Placeholder title="Компании и tenants" description="Холдинги, юридические лица, филиалы, владельцы и статусы доступа." icon={Building2} />} /><Route path="/subscriptions" element={<Placeholder title="Тарифы и подписки" description="Лицензии, счета, платежи, grace period и лимиты использования." icon={BadgeDollarSign} />} /><Route path="/users" element={<Placeholder title="Identity Directory" description="Единый каталог пользователей, ролей, продуктов и филиалов." icon={Users} />} /><Route path="/integrations" element={<Placeholder title="Интеграции" description="API-адаптеры, webhooks, секреты, токены и фоновые синхронизации." icon={Network} />} /><Route path="/operations" element={<Placeholder title="Operations Center" description="Мониторинг, очереди, релизы, incidents и command center." icon={Gauge} />} /><Route path="/audit" element={<Placeholder title="Аудит и безопасность" description="Неизменяемый журнал действий, approvals и break-glass access." icon={FileCheck2} />} /><Route path="/support" element={<Placeholder title="Customer Success и Support" description="Онбординг, обращения, SLA, диагностика и health score." icon={LifeBuoy} />} /><Route path="/settings" element={<Placeholder title="Настройки платформы" description="Роли, feature flags, окружения, уведомления и политики хранения." icon={Settings} />} /></Routes></Shell>;
 }
