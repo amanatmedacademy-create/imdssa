@@ -10,6 +10,7 @@ import { BillingProvider } from './features/billing/BillingContext';
 import { BillingOperationsProvider } from './features/billingOperations/BillingOperationsContext';
 import { GovernanceProvider } from './features/governance/GovernanceContext';
 import { IdentityProvider } from './features/identity/IdentityContext';
+import { ModuleRuntimeProvider } from './features/modules/ModuleRuntimeContext';
 import { ObservabilityProvider } from './features/observability/ObservabilityContext';
 import { OperationsProvider } from './features/operations/OperationsContext';
 import { ProductCatalogProvider } from './features/products/ProductCatalogContext';
@@ -28,6 +29,7 @@ import './observability.css';
 import './productAnalytics.css';
 import './support.css';
 import './governance.css';
+import './moduleRuntime.css';
 import './frontendFixes.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -46,7 +48,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                           <ProductAnalyticsProvider>
                             <SupportProvider>
                               <GovernanceProvider>
-                                <App />
+                                <ModuleRuntimeProvider>
+                                  <App />
+                                </ModuleRuntimeProvider>
                               </GovernanceProvider>
                             </SupportProvider>
                           </ProductAnalyticsProvider>
