@@ -20,6 +20,8 @@ export type Permission =
   | 'operations.manage'
   | 'observability.read'
   | 'observability.manage'
+  | 'analytics.read'
+  | 'analytics.manage'
   | 'security.read'
   | 'security.request'
   | 'security.sessions.manage'
@@ -39,7 +41,8 @@ const allPermissions: Permission[] = [
   'products.read','products.manage','subscriptions.read','subscriptions.manage',
   'billing.operations.read','billing.operations.manage','users.read','users.manage',
   'integrations.read','integrations.manage','operations.read','operations.manage',
-  'observability.read','observability.manage','security.read','security.request','security.sessions.manage',
+  'observability.read','observability.manage','analytics.read','analytics.manage',
+  'security.read','security.request','security.sessions.manage',
   'audit.read','audit.verify','support.read','support.manage','governance.read','governance.manage',
   'settings.read','settings.manage','impersonation.start','approvals.review',
 ];
@@ -49,8 +52,8 @@ const rolePermissions: Record<GlobalRole, ReadonlySet<Permission>> = {
   super_admin: new Set(allPermissions),
   support_admin: new Set([
     'dashboard.read','organizations.read','products.read','subscriptions.read','billing.operations.read',
-    'users.read','integrations.read','operations.read','observability.read','security.read','security.request',
-    'audit.read','support.read','support.manage','governance.read','impersonation.start',
+    'users.read','integrations.read','operations.read','observability.read','analytics.read',
+    'security.read','security.request','audit.read','support.read','support.manage','governance.read','impersonation.start',
   ]),
   finance_admin: new Set([
     'dashboard.read','organizations.read','products.read','subscriptions.read','subscriptions.manage',
@@ -60,8 +63,9 @@ const rolePermissions: Record<GlobalRole, ReadonlySet<Permission>> = {
   technical_admin: new Set([
     'dashboard.read','organizations.read','products.read','products.manage','subscriptions.read',
     'billing.operations.read','integrations.read','integrations.manage','operations.read','operations.manage',
-    'observability.read','observability.manage','security.read','security.request','audit.read',
-    'support.read','support.manage','governance.read','governance.manage','settings.read',
+    'observability.read','observability.manage','analytics.read','analytics.manage',
+    'security.read','security.request','audit.read','support.read','support.manage',
+    'governance.read','governance.manage','settings.read',
   ]),
   sales_manager: new Set([
     'dashboard.read','organizations.read','organizations.create','organizations.update','products.read',
@@ -70,7 +74,7 @@ const rolePermissions: Record<GlobalRole, ReadonlySet<Permission>> = {
   ]),
   auditor: new Set([
     'dashboard.read','organizations.read','products.read','subscriptions.read','billing.operations.read',
-    'users.read','integrations.read','operations.read','observability.read','security.read',
+    'users.read','integrations.read','operations.read','observability.read','analytics.read','security.read',
     'audit.read','audit.verify','support.read','governance.read','settings.read',
   ]),
 };

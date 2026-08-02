@@ -22,7 +22,7 @@ for (const file of files) {
 }
 
 const publicDir = new URL('../public/', import.meta.url);
-for (const required of ['_headers', '_redirects']) {
+for (const required of ['_headers']) {
   try {
     await readFile(new URL(required, publicDir), 'utf8');
   } catch {

@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 import { AuthGate } from './core/AuthGate';
 import { AuthProvider } from './core/auth';
+import { ProductAnalyticsProvider } from './features/analytics/ProductAnalyticsContext';
 import { BillingProvider } from './features/billing/BillingContext';
 import { BillingOperationsProvider } from './features/billingOperations/BillingOperationsContext';
 import { GovernanceProvider } from './features/governance/GovernanceContext';
@@ -22,6 +23,7 @@ import './billingOperations.css';
 import './operations.css';
 import './security.css';
 import './observability.css';
+import './productAnalytics.css';
 import './support.css';
 import './governance.css';
 
@@ -37,11 +39,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                   <OperationsProvider>
                     <SecurityProvider>
                       <ObservabilityProvider>
-                        <SupportProvider>
-                          <GovernanceProvider>
-                            <App />
-                          </GovernanceProvider>
-                        </SupportProvider>
+                        <ProductAnalyticsProvider>
+                          <SupportProvider>
+                            <GovernanceProvider>
+                              <App />
+                            </GovernanceProvider>
+                          </SupportProvider>
+                        </ProductAnalyticsProvider>
                       </ObservabilityProvider>
                     </SecurityProvider>
                   </OperationsProvider>

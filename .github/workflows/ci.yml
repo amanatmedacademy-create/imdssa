@@ -48,6 +48,12 @@ jobs:
       - name: Type check Platform API
         run: npm run lint --workspace @imds/platform-api
 
+      - name: Type check browser telemetry SDK
+        run: npm run typecheck --workspace @imds/telemetry-web
+
+      - name: Type check server telemetry SDK
+        run: npm run typecheck --workspace @imds/telemetry-node
+
       - name: Build Superadmin Web
         run: npm run build
 
