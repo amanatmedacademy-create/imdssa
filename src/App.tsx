@@ -9,8 +9,6 @@ import {
   ChevronRight,
   CircleDollarSign,
   CloudCog,
-  FileCheck2,
-  Gauge,
   Headphones,
   KeyRound,
   LayoutDashboard,
@@ -33,10 +31,14 @@ import type { Permission } from './core/permissions';
 import { roleLabels } from './core/permissions';
 import { useBilling } from './features/billing/BillingContext';
 import { SubscriptionsPage } from './features/billing/SubscriptionsPage';
+import { IdentityDirectoryPage } from './features/identity/IdentityDirectoryPage';
 import { CompaniesPage } from './features/organizations/CompaniesPage';
+import { OperationsPage } from './features/operations/OperationsPage';
 import { useProductCatalog } from './features/products/ProductCatalogContext';
 import { ProductsPage } from './features/products/ProductsPage';
 import type { ManagedProduct } from './features/products/productRepository';
+import { SecurityCenterPage } from './features/security/SecurityCenterPage';
+import { useSecurity } from './features/security/SecurityContext';
 import { env } from './lib/env';
 
 type NavigationItem = {
@@ -54,7 +56,7 @@ const nav: NavigationItem[] = [
   { to: '/users', label: 'Пользователи', icon: Users, permission: 'users.read' },
   { to: '/integrations', label: 'Интеграции', icon: Network, permission: 'integrations.read' },
   { to: '/operations', label: 'Операции', icon: Activity, permission: 'operations.read' },
-  { to: '/audit', label: 'Аудит', icon: ShieldCheck, permission: 'audit.read' },
+  { to: '/security', label: 'Безопасность', icon: ShieldCheck, permission: 'security.read' },
   { to: '/support', label: 'Поддержка', icon: Headphones, permission: 'support.read' },
   { to: '/settings', label: 'Настройки', icon: Settings, permission: 'settings.read' },
 ];
@@ -158,6 +160,7 @@ function Dashboard() {
   const { can, isDemo } = useAuth();
   const { products, loading: productsLoading, error: productsError } = useProductCatalog();
   const { subscriptions, loading: billingLoading, error: billingError } = useBilling();
+  const { requests: securityRequests, sessions: securitySessions, error: securityError } = useSecurity();
   const activeProducts = products.filter((product) => !product.archivedAt);
   const activeLicenses = subscriptions.reduce(
     (sum, subscription) => sum + subscription.licenses.filter((license) => license.status !== 'revoked').length,
@@ -166,12 +169,14 @@ function Dashboard() {
   const mrr = subscriptions
     .filter((subscription) => subscription.status === 'active')
     .reduce((sum, subscription) => sum + (subscription.billingInterval === 'annual' ? subscription.effectivePrice / 12 : subscription.billingInterval === 'monthly' ? subscription.effectivePrice : 0), 0);
+  const pendingApprovals = securityRequests.filter((request) => request.status === 'pending').length;
+  const activePrivilegedSessions = securitySessions.filter((session) => session.status === 'active').length;
 
   return (
     <>
       <div className="page-heading"><div><span className="eyebrow">Платформа</span><h1>Центр управления IMDS</h1><p>Компании, продукты, лицензии, инфраструктура и операционный контроль.</p></div>{can('organizations.create') && <NavLink className="primary-button" to="/companies"><Building2 size={17} /> Создать компанию</NavLink>}</div>
       {isDemo && <div className="mode-banner"><ShieldCheck size={18} /><div><strong>Интерфейс работает в демо-режиме</strong><span>Укажите Supabase URL и anon key, примените миграции и создайте platform_owner для включения production-контроля.</span></div></div>}
-      {(productsError || billingError) && <div className="error-banner"><AlertTriangle size={18} /><span>{productsError ?? billingError}</span></div>}
+      {(productsError || billingError || securityError) && <div className="error-banner"><AlertTriangle size={18} /><span>{productsError ?? billingError ?? securityError}</span></div>}
       <section className="metrics">
         <Metric icon={Building2} label="Активные компании" value="68" note="+6 за 30 дней" />
         <Metric icon={Users} label="Пользователи" value="1 284" note="1 042 активны" />
@@ -190,8 +195,8 @@ function Dashboard() {
           <div className="panel-header"><div><h2>Операционный контроль</h2><p>Требует внимания</p></div></div>
           <div className="alerts">
             <div className="alert critical"><AlertTriangle size={18} /><div><strong>Meta Ads API</strong><span>Повышенный процент ошибок: 8,4%</span></div></div>
+            <NavLink className="alert" to="/security"><ShieldAlert size={18} /><div><strong>{pendingApprovals} заявок на согласование</strong><span>{activePrivilegedSessions} привилегированных сессий активны</span></div></NavLink>
             <div className="alert"><Webhook size={18} /><div><strong>12 failed webhooks</strong><span>Ожидают повторной обработки</span></div></div>
-            <div className="alert"><KeyRound size={18} /><div><strong>7 токенов истекают</strong><span>В течение ближайших 14 дней</span></div></div>
             <div className="alert"><BadgeDollarSign size={18} /><div><strong>{subscriptions.filter((subscription) => ['past_due', 'grace_period'].includes(subscription.status)).length} проблемных подписок</strong><span>Требуют проверки оплаты</span></div></div>
           </div>
         </article>
@@ -204,7 +209,7 @@ function Dashboard() {
           <div className="quick-actions">
             <NavLink to="/companies"><Building2 size={18} /><span><strong>Новая компания</strong><small>Создать tenant и владельца</small></span></NavLink>
             <NavLink to="/subscriptions"><PackageCheck size={18} /><span><strong>Выдать лицензию</strong><small>Активировать тариф и продукты</small></span></NavLink>
-            <NavLink to="/support"><LockKeyhole size={18} /><span><strong>Support session</strong><small>Безопасный вход от имени клиента</small></span></NavLink>
+            <NavLink to="/security"><LockKeyhole size={18} /><span><strong>Support session</strong><small>Запросить согласованный вход от имени клиента</small></span></NavLink>
             <NavLink to="/operations"><CloudCog size={18} /><span><strong>Incident mode</strong><small>Ограничить проблемный сервис</small></span></NavLink>
           </div>
         </article>
@@ -225,10 +230,11 @@ export function App() {
         <Route path="/companies" element={<RequirePermission permission="organizations.read"><CompaniesPage /></RequirePermission>} />
         <Route path="/products" element={<RequirePermission permission="products.read"><ProductsPage /></RequirePermission>} />
         <Route path="/subscriptions" element={<RequirePermission permission="subscriptions.read"><SubscriptionsPage /></RequirePermission>} />
-        <Route path="/users" element={<RequirePermission permission="users.read"><Placeholder title="Identity Directory" description="Единый каталог пользователей, ролей, продуктов и филиалов." icon={Users} /></RequirePermission>} />
+        <Route path="/users" element={<RequirePermission permission="users.read"><IdentityDirectoryPage /></RequirePermission>} />
         <Route path="/integrations" element={<RequirePermission permission="integrations.read"><Placeholder title="Интеграции" description="API-адаптеры, webhooks, секреты, токены и фоновые синхронизации." icon={Network} /></RequirePermission>} />
-        <Route path="/operations" element={<RequirePermission permission="operations.read"><Placeholder title="Operations Center" description="Мониторинг, очереди, релизы, incidents и command center." icon={Gauge} /></RequirePermission>} />
-        <Route path="/audit" element={<RequirePermission permission="audit.read"><Placeholder title="Аудит и безопасность" description="Неизменяемый журнал действий, approvals и break-glass access." icon={FileCheck2} /></RequirePermission>} />
+        <Route path="/operations" element={<RequirePermission permission="operations.read"><OperationsPage /></RequirePermission>} />
+        <Route path="/security" element={<RequirePermission permission="security.read"><SecurityCenterPage /></RequirePermission>} />
+        <Route path="/audit" element={<RequirePermission permission="security.read"><SecurityCenterPage /></RequirePermission>} />
         <Route path="/support" element={<RequirePermission permission="support.read"><Placeholder title="Customer Success и Support" description="Онбординг, обращения, SLA, диагностика и health score." icon={LifeBuoy} /></RequirePermission>} />
         <Route path="/settings" element={<RequirePermission permission="settings.read"><Placeholder title="Настройки платформы" description="Роли, feature flags, окружения, уведомления и политики хранения." icon={Settings} /></RequirePermission>} />
       </Routes>
