@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 15
     env:
       VITE_APP_ENV: development
-      VITE_APP_VERSION: 0.3.0
+      VITE_APP_VERSION: 0.4.0
       VITE_RELEASE_SHA: ${{ github.sha }}
     steps:
       - name: Checkout
@@ -36,10 +36,19 @@ jobs:
       - name: Validate repository
         run: npm run validate:repository
 
-      - name: Type check
+      - name: Type check Superadmin Web
         run: npm run lint
 
-      - name: Build
+      - name: Type check platform contracts
+        run: npm run lint --workspace @imds/platform-types
+
+      - name: Type check Platform SDK
+        run: npm run lint --workspace @imds/platform-sdk
+
+      - name: Type check Platform API
+        run: npm run lint --workspace @imds/platform-api
+
+      - name: Build Superadmin Web
         run: npm run build
 
       - name: Audit production dependencies
