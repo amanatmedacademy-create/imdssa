@@ -12,9 +12,14 @@ Central control plane for the IMDS product ecosystem.
 - Atomic creation of an organization, primary legal entity and first branch.
 - Organization editing, privileged archive and restore commands.
 - Product registry for eleven IMDS products with archive safeguards.
-- RLS policies for control-plane tables.
-- Guarded security-definer RPC functions for privileged mutations.
-- Append-only audit events with mutation prevention.
+- Subscription, license and entitlement control-plane foundation.
+- Identity directory, security approvals and privileged-session controls.
+- Checkmate adapter, service registry, incidents and observability center.
+- Product Analytics Center with users online, active/idle sessions, feature adoption and tenant activity.
+- Browser and Node telemetry SDK packages with a protected Supabase Edge Function ingestion gateway.
+- RLS policies and explicit Data API grants for control-plane tables.
+- Guarded security-definer RPC functions for privileged mutations and aggregate reporting.
+- Append-only audit and telemetry events with controlled retention.
 - Product seed data and domain integrity triggers.
 - Architecture views for context, services, multi-tenancy and customer lifecycle.
 
@@ -54,7 +59,7 @@ Without Supabase variables, the UI runs in demo mode and stores editable registr
 ## Supabase activation
 
 1. Create a dedicated Supabase project for the IMDS control plane.
-2. Apply migrations from `supabase/migrations` in numeric order.
+2. Apply migrations from `supabase/migrations` in repository order.
 3. Configure authentication providers and create the first staff account.
 4. Sign in once so the `platform_users` profile is created by the auth trigger.
 5. Execute `select public.bootstrap_platform_owner();` as that authenticated account through an RPC-capable client.
@@ -69,30 +74,49 @@ VITE_APP_VERSION=0.2.0
 
 The service role key must never be exposed to the frontend.
 
+## Edge Functions
+
+The control plane includes protected worker and ingestion functions:
+
+- `provisioning-worker`;
+- `integration-webhook`;
+- `integration-worker`;
+- `api-gateway`;
+- `checkmate-adapter`;
+- `telemetry-ingest`.
+
+Product telemetry setup and privacy rules are documented in [`docs/PRODUCT_ANALYTICS.md`](docs/PRODUCT_ANALYTICS.md). Checkmate deployment and synchronization are documented in [`docs/OBSERVABILITY_CHECKMATE.md`](docs/OBSERVABILITY_CHECKMATE.md).
+
 ## Repository structure
 
 ```text
 src/core/                         Auth and RBAC
 src/features/organizations/      Tenant/company management
+src/features/observability/      Checkmate projections and incidents
+src/features/analytics/          Product usage and live presence UI
 src/lib/                          Environment, database types, Supabase client
-src/productRegistry.tsx           Product registry UI
+packages/telemetry-web/           Browser telemetry SDK
+packages/telemetry-node/          Backend telemetry SDK
+supabase/functions/               Trusted workers and ingestion gateways
 supabase/migrations/              Control-plane database and security
- docs/ARCHITECTURE.md              Architecture diagrams and rules
+docs/                             Architecture and deployment runbooks
 ```
 
 ## Architecture principle
 
-The Super Admin is a separate control plane. It stores companies, users, roles, subscriptions, licenses, entitlements, integration state and audit data. Medical, CRM, marketing and financial operational records remain inside their respective products and are accessed only through versioned APIs and product adapters.
+The Super Admin is a separate control plane. It stores companies, users, roles, subscriptions, licenses, entitlements, integration state, normalized monitoring projections, product telemetry and audit data. Medical, CRM, marketing and financial operational records remain inside their respective products and are accessed only through versioned APIs and product adapters.
+
+Product telemetry must never contain medical records, diagnoses, patient notes, phone numbers, email addresses, form content, search text, messages, access tokens or API payloads.
 
 ## Delivery order
 
-1. Identity, RBAC and companies — implemented foundation.
-2. Product Registry connected to Supabase and adapter contracts.
-3. Tariffs, subscriptions, licenses and entitlements.
-4. Workflow engine and automated tenant provisioning.
-5. Usage metering and billing.
-6. Integration registry, webhooks and background jobs.
-7. Audit UI, approvals, impersonation and break-glass access.
-8. Monitoring, incidents, release management and status page.
-9. Customer onboarding, support, SLA and health score.
-10. Data governance, retention, backup and disaster recovery.
+1. Identity, RBAC and companies — implemented.
+2. Product Registry and adapter contracts — implemented foundation.
+3. Tariffs, subscriptions, licenses and entitlements — implemented foundation.
+4. Workflow engine and automated tenant provisioning — implemented foundation.
+5. Usage metering and Product Analytics — implemented foundation.
+6. Integration registry, webhooks and background jobs — implemented foundation.
+7. Audit UI, approvals, impersonation and break-glass access — implemented foundation.
+8. Monitoring, Checkmate adapter, incidents and status management — implemented foundation.
+9. Customer onboarding, support, SLA and health score — scheduled.
+10. Data governance, backup and disaster recovery — scheduled.
