@@ -11,6 +11,7 @@ import { ObservabilityProvider } from './features/observability/ObservabilityCon
 import { OperationsProvider } from './features/operations/OperationsContext';
 import { ProductCatalogProvider } from './features/products/ProductCatalogContext';
 import { SecurityProvider } from './features/security/SecurityContext';
+import { SupportProvider } from './features/support/SupportContext';
 import './styles.css';
 import './productRegistry.css';
 import './controlPlane.css';
@@ -20,6 +21,7 @@ import './billingOperations.css';
 import './operations.css';
 import './security.css';
 import './observability.css';
+import './support.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -33,7 +35,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                   <OperationsProvider>
                     <SecurityProvider>
                       <ObservabilityProvider>
-                        <App />
+                        <SupportProvider>
+                          <App />
+                        </SupportProvider>
                       </ObservabilityProvider>
                     </SecurityProvider>
                   </OperationsProvider>
