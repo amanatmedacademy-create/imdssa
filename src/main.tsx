@@ -29,6 +29,7 @@ import './productAnalytics.css';
 import './support.css';
 import './governance.css';
 import './frontendFixes.css';
+import './moduleUiFixes.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
