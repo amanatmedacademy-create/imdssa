@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import './registerCrmProductCatalog';
 import {
   moduleRuntimeRepository,
   platformModules,
