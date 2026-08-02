@@ -57,6 +57,9 @@ jobs:
       - name: Build Superadmin Web
         run: npm run build
 
+      - name: Smoke test frontend routes and assets
+        run: npm run test:smoke:frontend
+
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=critical
 
