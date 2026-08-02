@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 import { AuthGate } from './core/AuthGate';
 import { AuthProvider } from './core/auth';
+import { ProductAnalyticsProvider } from './features/analytics/ProductAnalyticsContext';
 import { BillingProvider } from './features/billing/BillingContext';
 import { IdentityProvider } from './features/identity/IdentityContext';
 import { ObservabilityProvider } from './features/observability/ObservabilityContext';
@@ -18,6 +19,7 @@ import './billing.css';
 import './operations.css';
 import './security.css';
 import './observability.css';
+import './productAnalytics.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -30,7 +32,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                 <OperationsProvider>
                   <SecurityProvider>
                     <ObservabilityProvider>
-                      <App />
+                      <ProductAnalyticsProvider>
+                        <App />
+                      </ProductAnalyticsProvider>
                     </ObservabilityProvider>
                   </SecurityProvider>
                 </OperationsProvider>
