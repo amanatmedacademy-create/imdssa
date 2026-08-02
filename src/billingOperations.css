@@ -1,0 +1,18 @@
+.billing-operations-metrics { margin-bottom: 16px; }
+.billing-toolbar { display:flex; justify-content:flex-end; margin:14px 0; }
+.billing-toolbar input { width:min(420px,100%); border:1px solid var(--border); background:var(--surface); color:var(--text); border-radius:10px; padding:10px 12px; }
+.segmented-tabs { display:flex; gap:6px; padding:5px; width:max-content; max-width:100%; overflow:auto; border:1px solid var(--border); border-radius:12px; background:var(--surface); }
+.segmented-tabs button { border:0; background:transparent; color:var(--muted); border-radius:8px; padding:9px 14px; cursor:pointer; white-space:nowrap; }
+.segmented-tabs button.active { background:var(--primary-soft); color:var(--primary); font-weight:700; }
+.row-actions { display:flex; justify-content:flex-end; gap:7px; flex-wrap:wrap; }
+.dunning-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+.dunning-card p { color:var(--muted); line-height:1.5; }
+.dunning-card dl { display:grid; gap:8px; margin:18px 0 0; }
+.dunning-card dl div { display:flex; justify-content:space-between; gap:20px; padding-top:8px; border-top:1px solid var(--border); }
+.dunning-card dt { color:var(--muted); }
+.dunning-card dd { margin:0; font-weight:700; text-align:right; }
+.warning-box { display:flex; gap:9px; align-items:flex-start; padding:11px 12px; border-radius:10px; background:rgba(245,158,11,.12); color:#b45309; margin-top:12px; }
+.status.danger { background:rgba(239,68,68,.12); color:#dc2626; }
+.danger-button.compact,.secondary-button.compact,.primary-button.compact { padding:7px 10px; font-size:12px; }
+@media (max-width:1100px){.dunning-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media (max-width:720px){.dunning-grid{grid-template-columns:1fr}.segmented-tabs{width:100%}.billing-toolbar input{width:100%}}
