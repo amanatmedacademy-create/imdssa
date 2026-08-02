@@ -1,0 +1,22 @@
+name = "imds-platform-api"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+workers_dev = false
+
+[vars]
+ADMIN_JWT_AUDIENCE = "imds-platform-admin"
+ALLOWED_ORIGINS = "https://admin.imds24.com,https://staging-admin.imds24.com"
+
+[env.staging]
+name = "imds-platform-api-staging"
+
+[env.staging.vars]
+ADMIN_JWT_AUDIENCE = "imds-platform-admin-staging"
+ALLOWED_ORIGINS = "https://staging-admin.imds24.com"
+
+[env.production]
+name = "imds-platform-api-production"
+
+[env.production.vars]
+ADMIN_JWT_AUDIENCE = "imds-platform-admin"
+ALLOWED_ORIGINS = "https://admin.imds24.com"

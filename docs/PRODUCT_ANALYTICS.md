@@ -1,13 +1,13 @@
 # IMDS Product Analytics and Live Presence
 
-## Назначение
+## 1. Назначение
 
 Product Analytics отвечает на вопросы, которые внешний uptime-monitoring не закрывает:
 
 - какой продукт и модуль используют сейчас;
 - кто онлайн, кто реально активен, а кто оставил вкладку открытой;
 - сколько активного времени приходится на пользователя, компанию и продукт;
-- какие функции используются, а какие не получают adoption;
+- какие функции используются и какие не получают adoption;
 - где растёт доля ошибок;
 - какие компании сокращают активность и входят в риск оттока;
 - внутри какого host-продукта открыт модуль и какому продукту он принадлежит.
@@ -25,11 +25,11 @@ IMDS Super Admin
   -> Единый операционный экран продуктов, компаний, инцидентов и usage.
 ```
 
-## Реализованные компоненты
+## 2. Реализованные компоненты
 
-### База control plane
+### 2.1 Control-plane database
 
-Миграция `supabase/migrations/0020_product_analytics.sql` добавляет:
+Миграция `supabase/migrations/0022_product_analytics.sql` добавляет:
 
 - `telemetry_sources`;
 - `telemetry_event_definitions`;
@@ -42,7 +42,9 @@ IMDS Super Admin
 - функции session expiry, daily rollup и retention cleanup;
 - RLS, явные Data API grants и append-only ограничения.
 
-### Ingestion gateway
+Номера `0020` и `0021` заняты Platform Modules/Installations runtime, поэтому Product Analytics начинается с `0022`.
+
+### 2.2 Ingestion gateway
 
 `supabase/functions/telemetry-ingest/index.ts` обеспечивает:
 
@@ -50,21 +52,23 @@ IMDS Super Admin
 - сравнение SHA-256-хэша write key;
 - точный browser origin allow-list;
 - rate limit на источник;
-- лимит запроса 256 KiB и до 100 событий;
+- лимит запроса 256 KiB;
+- максимум 100 событий в batch;
 - разрешённый каталог event names;
 - property allow-list;
 - фильтрацию чувствительных полей;
 - проверку UUID и временных меток;
 - deterministic sampling;
 - idempotency по request ID и event ID;
+- стабильный JSON error response;
 - аудит batch без хранения IP и raw request body.
 
-### SDK
+### 2.3 SDK
 
 - `packages/telemetry-web` — browser session, heartbeat, active/idle time, navigation, module и feature events, offline queue.
 - `packages/telemetry-node` — sanitized backend latency, status и error events.
 
-### Super Admin
+### 2.4 Super Admin
 
 Раздел `/analytics` содержит:
 
@@ -76,7 +80,7 @@ IMDS Super Admin
 - реестр telemetry sources;
 - создание источника и одноразовую выдачу write key.
 
-## Граница безопасности и приватности
+## 3. Граница безопасности и приватности
 
 Product telemetry не является хранилищем медицинских данных.
 
@@ -102,11 +106,25 @@ Product telemetry не является хранилищем медицинск�
 }
 ```
 
+Запрещённый пример:
+
+```json
+{
+  "eventName": "feature_used",
+  "properties": {
+    "patientName": "...",
+    "phone": "...",
+    "diagnosis": "...",
+    "comment": "..."
+  }
+}
+```
+
 SDK выполняет первую фильтрацию. Edge Function повторно валидирует payload и удаляет свойства, которых нет в event catalog.
 
-## Модель сессии
+## 4. Модель сессии
 
-### Статусы
+### 4.1 Статусы
 
 - `active` — heartbeat не старше 90 секунд, вкладка видима, действие было не более 60 секунд назад;
 - `idle` — heartbeat приходит, но активных действий нет;
@@ -115,7 +133,7 @@ SDK выполняет первую фильтрацию. Edge Function повт
 
 `pagehide` переводит browser session в `offline`, а не в `closed`, поэтому reload не закрывает её навсегда. Явный logout должен вызывать `telemetry.stop()`.
 
-### Учёт времени
+### 4.2 Учёт времени
 
 Active time увеличивается только когда:
 
@@ -126,7 +144,7 @@ Active time увеличивается только когда:
 
 Просто открытая вкладка не считается активной работой.
 
-### Рекомендуемые значения
+### 4.3 Рекомендуемые значения
 
 | Настройка | Значение |
 |---|---:|
@@ -140,7 +158,7 @@ Active time увеличивается только когда:
 | Server batch | 50 событий |
 | Ingestion maximum | 100 событий |
 
-## Host product и module owner
+## 5. Host product и module owner
 
 Модуль может отображаться внутри другого продукта. Всегда фиксируются две размерности.
 
@@ -152,9 +170,9 @@ telemetry.module('crm_kanban', 'CRM Kanban', 'imds-crm');
 
 Telemetry source определяет host product (`imds-marketing`), а `moduleOwnerProductKey` — владельца модуля (`imds-crm`). Это нужно для корректного usage metering, лицензирования и cross-product аналитики.
 
-## Развёртывание Supabase
+## 6. Развёртывание Supabase
 
-### Edge Function secrets
+### 6.1 Edge Function secrets
 
 ```text
 SUPABASE_URL
@@ -163,15 +181,15 @@ SUPABASE_SERVICE_ROLE_KEY
 
 Service role key хранится только в Edge Function secrets и никогда не попадает в Vite, browser bundle или логи клиента.
 
-### Применение схемы
+### 6.2 Применение схемы
 
 Примените миграции в числовом порядке и проверьте наличие версии:
 
 ```text
-0020_product_analytics.sql
+0022_product_analytics.sql
 ```
 
-### Deploy функции
+### 6.3 Deploy функции
 
 ```bash
 supabase functions deploy telemetry-ingest --no-verify-jwt
@@ -179,7 +197,7 @@ supabase functions deploy telemetry-ingest --no-verify-jwt
 
 `verify_jwt = false` установлен осознанно: продукты авторизуются отдельными ingestion credentials, а не JWT пользователя Super Admin.
 
-### Scheduler
+### 6.4 Scheduler
 
 Каждую минуту:
 
@@ -201,7 +219,7 @@ select public.purge_expired_product_usage_data();
 
 Rollup конкретной даты можно безопасно пересобрать повторным вызовом функции.
 
-## Создание telemetry source
+## 7. Создание telemetry source
 
 1. Откройте **Super Admin → Аналитика продуктов → Источники**.
 2. Нажмите **Подключить продукт**.
@@ -231,7 +249,7 @@ imds-mis-web-staging
 
 Browser/server и production/staging должны иметь разные источники.
 
-## Browser integration
+## 8. Browser integration
 
 ```ts
 import { createImdsTelemetry } from '@imds/telemetry-web';
@@ -280,7 +298,7 @@ Logout:
 await telemetry.stop();
 ```
 
-## Server integration
+## 9. Server integration
 
 ```ts
 import { createImdsTelemetryNode } from '@imds/telemetry-node';
@@ -306,7 +324,7 @@ app.use(telemetry.createHttpMiddleware((request) => ({
 
 Browser session ID нельзя повторно использовать в server source: primary session identity привязана к одному telemetry source. Корреляция backend performance выполняется по product, tenant, user, route и release; distributed tracing остаётся задачей observability layer.
 
-## Event catalog
+## 10. Event catalog
 
 | Event | Category | Назначение |
 |---|---|---|
@@ -329,7 +347,7 @@ Browser session ID нельзя повторно использовать в ser
 
 Новое event name добавляется только через migration после privacy review и объявления разрешённых property keys.
 
-## Порядок подключения продуктов
+## 11. Порядок подключения продуктов
 
 1. IMDS Marketing browser staging.
 2. IMDS Marketing server staging.
@@ -355,7 +373,7 @@ Browser session ID нельзя повторно использовать в ser
 9. При необходимости начать с sampling.
 10. Перейти на 100% после проверки.
 
-## Acceptance criteria
+## 12. Acceptance criteria
 
 Продукт считается подключённым, когда:
 
@@ -374,7 +392,7 @@ Browser session ID нельзя повторно использовать в ser
 - scheduler успешно выполнил expiry, rollup и retention;
 - фильтры Super Admin возвращают ожидаемый продукт.
 
-## Диагностика
+## 13. Диагностика
 
 ### События не поступают
 
@@ -401,6 +419,6 @@ Browser session ID нельзя повторно использовать в ser
 
 Product Analytics определяет product/module/feature/release/tenant. Checkmate и tracing layer используются для поиска infrastructure и request root cause.
 
-## Retention и backup
+## 14. Retention и backup
 
 Raw events хранятся по retention каждого source, по умолчанию 90 дней. Daily rollups предназначены для долгосрочной аналитики. Увеличение raw retention требует отдельного business justification и privacy review.

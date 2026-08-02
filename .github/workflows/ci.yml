@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 15
     env:
       VITE_APP_ENV: development
-      VITE_APP_VERSION: 0.3.0
+      VITE_APP_VERSION: 0.4.0
       VITE_RELEASE_SHA: ${{ github.sha }}
     steps:
       - name: Checkout
@@ -36,27 +36,26 @@ jobs:
       - name: Validate repository
         run: npm run validate:repository
 
-      - name: Type check
+      - name: Type check Superadmin Web
         run: npm run lint
 
-      - name: Build
-        run: npm run build
+      - name: Type check platform contracts
+        run: npm run lint --workspace @imds/platform-types
 
-      - name: Install browser telemetry SDK dependencies
-        working-directory: packages/telemetry-web
-        run: npm install --no-audit --no-fund
+      - name: Type check Platform SDK
+        run: npm run lint --workspace @imds/platform-sdk
+
+      - name: Type check Platform API
+        run: npm run lint --workspace @imds/platform-api
 
       - name: Type check browser telemetry SDK
-        working-directory: packages/telemetry-web
-        run: npm run typecheck
-
-      - name: Install server telemetry SDK dependencies
-        working-directory: packages/telemetry-node
-        run: npm install --no-audit --no-fund
+        run: npm run typecheck --workspace @imds/telemetry-web
 
       - name: Type check server telemetry SDK
-        working-directory: packages/telemetry-node
-        run: npm run typecheck
+        run: npm run typecheck --workspace @imds/telemetry-node
+
+      - name: Build Superadmin Web
+        run: npm run build
 
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=critical
