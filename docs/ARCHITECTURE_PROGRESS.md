@@ -10,4 +10,4 @@
 8. Observability, Checkmate adapter and incident management — implemented.
 9. Billing operations, invoices, payments, receivables and refunds — implemented.
 10. Customer Success, onboarding, tickets, SLA and customer health — implemented.
-11. Data governance, retention, export, backup and disaster recovery — scheduled.
+11. Data governance, retention, export, legal hold, backup, restore and disaster recovery — implemented.
