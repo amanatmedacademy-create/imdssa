@@ -4,6 +4,8 @@ import pg from 'pg';
 import { handleInternalRegistrationEvent } from './registrationNotifications.js';
 import { handleNotificationSettingsApi } from './notificationSettings.js';
 import { createSessionToken, hashPassword, hashToken, validatePassword, verifyPassword } from './security.js';
+import { handleTenantApi } from './tenantRoutes.js';
+import { loadTenantAccess, organizationIds, serializeMemberships } from './tenantAccess.js';
 
 const { Pool, Client } = pg;
 const host = process.env.HOST || '127.0.0.1';
@@ -12,9 +14,10 @@ const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
 
 const pool = new Pool({ connectionString: databaseUrl, max: 10 });
-const listeners = new Set<ServerResponse>();
+type ListenerScope = { isPlatformUser: boolean; organizationIds: Set<string> };
+const listeners = new Map<ServerResponse, ListenerScope>();
 
-type User = { id: string; email: string; full_name: string; global_role: string; is_active: boolean };
+type User = { id: string; email: string; full_name: string; global_role: string | null; is_active: boolean };
 type LoginUser = User & { password_hash: string; failed_login_attempts: number; locked_until: string | null };
 
 function json(res: ServerResponse, status: number, body: unknown) {
@@ -142,8 +145,9 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const session = createSessionToken();
     await pool.query(`insert into app.auth_sessions(user_id,token_hash,expires_at,source_ip,user_agent) values($1,$2,now()+interval '12 hours',$3::inet,$4)`, [row.id, session.hash, ip, userAgent(req)]);
     await pool.query('update app.platform_users set last_seen_at=now(),last_login_ip=$2::inet,failed_login_attempts=0,locked_until=null where id=$1', [row.id, ip]);
+    const access = await loadTenantAccess(pool, row);
     setSessionCookie(res, session.token);
-    return json(res, 200, { user: { id: row.id, email: row.email, fullName: row.full_name, role: row.global_role } });
+    return json(res, 200, { user: { id: row.id, email: row.email, fullName: row.full_name, role: row.global_role || access.memberships[0]?.role || 'member', scope: access.isPlatformUser ? 'platform' : 'tenant', memberships: serializeMemberships(access) } });
   }
 
   if (url.pathname === '/api/auth/logout' && method === 'POST') {
@@ -155,7 +159,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
   if (url.pathname === '/api/auth/me' && method === 'GET') {
     const user = await requireUser(req, res); if (!user) return;
-    return json(res, 200, { user: { id: user.id, email: user.email, fullName: user.full_name, role: user.global_role } });
+    const access = await loadTenantAccess(pool, user);
+    return json(res, 200, { user: { id: user.id, email: user.email, fullName: user.full_name, role: user.global_role || access.memberships[0]?.role || 'member', scope: access.isPlatformUser ? 'platform' : 'tenant', memberships: serializeMemberships(access) } });
   }
 
   if (url.pathname === '/api/auth/change-password' && method === 'POST') {
@@ -183,21 +188,26 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       throw error;
     } finally { client.release(); }
     await audit(req, user.id, 'auth.password.change', 'platform_user', user.id, null, { sessionsRevoked: true });
+    const access = await loadTenantAccess(pool, user);
     setSessionCookie(res, session.token);
-    return json(res, 200, { user: { id: user.id, email: user.email, fullName: user.full_name, role: user.global_role } });
+    return json(res, 200, { user: { id: user.id, email: user.email, fullName: user.full_name, role: user.global_role || access.memberships[0]?.role || 'member', scope: access.isPlatformUser ? 'platform' : 'tenant', memberships: serializeMemberships(access) } });
   }
 
   if (url.pathname === '/events' && method === 'GET') {
     const user = await requireUser(req, res); if (!user) return;
+    const access = await loadTenantAccess(pool, user);
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
-    listeners.add(res);
-    res.write(`event: ready\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+    listeners.set(res, { isPlatformUser: access.isPlatformUser, organizationIds: new Set(organizationIds(access)) });
+    res.write(`event: ready\ndata: ${JSON.stringify({ ok: true, scope: access.isPlatformUser ? 'platform' : 'tenant' })}\n\n`);
     const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 15000);
     req.on('close', () => { clearInterval(heartbeat); listeners.delete(res); });
     return;
   }
 
   const user = await requireUser(req, res); if (!user) return;
+  const access = await loadTenantAccess(pool, user);
+  if (await handleTenantApi({ req, res, pool, url, method, user, scope: access, json })) return;
+  if (!access.isPlatformUser && url.pathname.startsWith('/api/v1/')) return json(res, 403, { error: 'TENANT_SCOPE_REQUIRED' });
 
   if (await handleNotificationSettingsApi(req, res, pool, url, method, user)) return;
 
@@ -348,7 +358,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
 
   if (url.pathname === '/api/v1/audit' && method === 'GET') {
-    if (!['platform_owner','platform_admin','auditor'].includes(user.global_role)) return json(res, 403, { error: 'AUDIT_ACCESS_REQUIRED' });
+    if (!user.global_role || !['platform_owner','platform_admin','auditor'].includes(user.global_role)) return json(res, 403, { error: 'AUDIT_ACCESS_REQUIRED' });
     const result = await pool.query(`select a.*,u.email actor_email from app.audit_logs a left join app.platform_users u on u.id=a.actor_user_id order by a.created_at desc limit 100`);
     return json(res, 200, { items: result.rows });
   }
@@ -369,7 +379,10 @@ listener.on('notification', async (message) => {
       event = result.rows[0] || parsed;
     }
   } catch {}
-  for (const res of listeners) sse(res, event);
+  const eventOrganizationId = typeof event === 'object' && event !== null && 'organization_id' in event ? String((event as { organization_id?: unknown }).organization_id || '') : '';
+  for (const [res, scope] of listeners) {
+    if (scope.isPlatformUser || (eventOrganizationId && scope.organizationIds.has(eventOrganizationId))) sse(res, event);
+  }
 });
 
 setInterval(() => { void pool.query('delete from app.auth_sessions where expires_at<=now()'); void pool.query("delete from app.login_attempts where created_at<now()-interval '30 days'"); }, 300000).unref();
