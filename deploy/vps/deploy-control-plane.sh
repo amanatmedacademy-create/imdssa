@@ -57,7 +57,7 @@ systemctl stop imdssa-reconcile.timer imdssa-reconcile.service 2>/dev/null || tr
 systemctl stop imdssa-product-monitor.timer imdssa-product-monitor.service 2>/dev/null || true
 
 install -d -o root -g postgres -m 0750 "$APP_DIR/migrations"
-for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql 005_registration_notifications.sql 005_security_hardening.sql; do
+for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql 005_registration_notifications.sql 005_security_hardening.sql 007_notification_delivery_settings.sql; do
   install -o root -g postgres -m 0640 "$STAGE_DIR/$migration" "$APP_DIR/migrations/$migration"
   sudo -u postgres psql --set=ON_ERROR_STOP=1 --dbname=imdssa --file="$APP_DIR/migrations/$migration"
 done

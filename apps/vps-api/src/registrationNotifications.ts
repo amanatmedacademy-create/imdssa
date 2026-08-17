@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
+import { loadTelegramDeliverySettings } from './notificationSettings.js';
 
 type RegistrationPayload = {
   eventId: string;
@@ -93,10 +94,12 @@ function telegramText(event: RegistrationPayload): string {
   ].join('\n');
 }
 
-async function sendTelegram(event: RegistrationPayload): Promise<{ status: 'sent' | 'failed' | 'disabled'; messageId: string | null; error: string | null }> {
-  const token = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
-  const chatId = String(process.env.TELEGRAM_CHAT_ID || '').trim();
-  if (!token || !chatId) return { status: 'disabled', messageId: null, error: 'TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is not configured' };
+async function sendTelegram(pool: Pool, event: RegistrationPayload): Promise<{ status: 'sent' | 'failed' | 'disabled'; messageId: string | null; error: string | null }> {
+  const settings = await loadTelegramDeliverySettings(pool);
+  const token = settings.token;
+  const chatId = settings.chatId;
+  if (!settings.registrationEnabled) return { status: 'disabled', messageId: null, error: 'Registration Telegram notifications are disabled' };
+  if (!token || !chatId) return { status: 'disabled', messageId: null, error: 'Telegram is not configured' };
   try {
     const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
@@ -155,7 +158,7 @@ export async function handleInternalRegistrationEvent(req: IncomingMessage, res:
   }
   client.release();
 
-  const telegram = await sendTelegram(event);
+  const telegram = await sendTelegram(pool, event);
   await pool.query(`update app.registration_notifications set telegram_status=$2,telegram_message_id=$3,telegram_error=$4,updated_at=now() where id=$1`,
     [notificationId, telegram.status, telegram.messageId, telegram.error]);
   json(res, 202, { accepted: true, notificationId, telegramStatus: telegram.status });
