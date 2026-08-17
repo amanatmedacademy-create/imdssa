@@ -1,0 +1,148 @@
+name: Control Plane E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['agent/control-plane-e2e-protocol']
+    paths:
+      - '.github/workflows/control-plane-e2e.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - name: Validate VPS access
+        run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
+
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Verify desired to actual entitlement lifecycle
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          command -v jq >/dev/null 2>&1 || { apt-get update >/dev/null && apt-get install -y jq >/dev/null; }
+
+          SA_API='http://127.0.0.1:8788'
+          MARKETING_API='http://127.0.0.1:8787'
+          MODULE_CODE='marketing.analytics'
+          ORGANIZATION_NAME='Amanat Med Academy'
+
+          ADMIN_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end, created_at limit 1")"
+          test -n "$ADMIN_ID"
+          SA_TOKEN="$(openssl rand -hex 32)"
+          SA_TOKEN_HASH="$(printf '%s' "$SA_TOKEN" | sha256sum | awk '{print $1}')"
+          sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 --command="insert into app.auth_sessions(user_id,token_hash,expires_at) values ('$ADMIN_ID'::uuid,'$SA_TOKEN_HASH',now()+interval '10 minutes')" >/dev/null
+          SA_COOKIE="Cookie: imdssa_session=$SA_TOKEN"
+
+          installations="$(curl -fsS --max-time 15 -H "$SA_COOKIE" "$SA_API/api/v1/installations")"
+          installation_id="$(printf '%s' "$installations" | jq -r --arg code "$MODULE_CODE" --arg org "$ORGANIZATION_NAME" '.items[] | select(.module_code==$code and .organization_name==$org) | .id' | head -1)"
+          original_status="$(printf '%s' "$installations" | jq -r --arg id "$installation_id" '.items[] | select(.id==$id) | .status' | head -1)"
+          organization_id="$(printf '%s' "$installations" | jq -r --arg id "$installation_id" '.items[] | select(.id==$id) | .organization_id' | head -1)"
+          test -n "$installation_id" && test "$installation_id" != null
+          test "$original_status" = active -o "$original_status" = suspended
+          test -n "$organization_id" && test "$organization_id" != null
+
+          source /etc/imds-platform-control.env
+          test -n "${IMDS_PLATFORM_CONTROL_TOKEN:-}"
+
+          remote_state="$(curl -fsS --max-time 15 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" "$MARKETING_API/internal/platform/state")"
+          tenant_id="$(printf '%s' "$remote_state" | jq -r --arg org "$organization_id" '.tenants | to_entries[] | select(.value.organizationId==$org) | .key' | head -1)"
+          test -n "$tenant_id" && test "$tenant_id" != null
+
+          MARKETING_USER_ID="$(docker exec imds-postgres psql -U imds_owner -d imds_marketing -At -c "select id from public.imds_auth_users where lower(email)='admin@imds.kz' and status='active' limit 1")"
+          test -n "$MARKETING_USER_ID"
+          MARKETING_TOKEN="$(openssl rand -hex 48)"
+          MARKETING_TOKEN_HASH="$(printf '%s' "$MARKETING_TOKEN" | sha256sum | awk '{print $1}')"
+          docker exec imds-postgres psql -U imds_owner -d imds_marketing -v ON_ERROR_STOP=1 -c "insert into public.imds_auth_sessions(user_id,token_hash,remember_me,expires_at) values ('$MARKETING_USER_ID'::uuid,'$MARKETING_TOKEN_HASH',false,now()+interval '10 minutes')" >/dev/null
+
+          restore_status() {
+            current="$(curl -fsS --max-time 10 -H "$SA_COOKIE" "$SA_API/api/v1/installations" | jq -r --arg id "$installation_id" '.items[] | select(.id==$id) | .status' | head -1 || true)"
+            if [ "$current" != "$original_status" ]; then
+              curl -fsS --max-time 15 -H "$SA_COOKIE" -H 'content-type: application/json' -X PATCH "$SA_API/api/v1/installations/$installation_id" --data "{\"status\":\"$original_status\"}" >/dev/null || true
+              for _ in $(seq 1 25); do
+                systemctl start imdssa-reconcile.service >/dev/null 2>&1 || true
+                sleep 1
+                state="$(curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" "$MARKETING_API/internal/platform/state" 2>/dev/null || true)"
+                actual="$(printf '%s' "$state" | jq -r --arg tenant "$tenant_id" --arg code "$MODULE_CODE" '.tenants[$tenant].modules[$code]' 2>/dev/null || true)"
+                expected=true; [ "$original_status" = suspended ] && expected=false
+                [ "$actual" = "$expected" ] && break
+              done
+            fi
+            sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$SA_TOKEN_HASH'" >/dev/null 2>&1 || true
+            docker exec imds-postgres psql -U imds_owner -d imds_marketing -c "delete from public.imds_auth_sessions where token_hash='$MARKETING_TOKEN_HASH'" >/dev/null 2>&1 || true
+          }
+          trap restore_status EXIT
+
+          assert_synced() {
+            expected="$1"
+            start_revision="$2"
+            for attempt in $(seq 1 30); do
+              systemctl start imdssa-reconcile.service >/dev/null 2>&1 || true
+              sleep 1
+
+              installations_now="$(curl -fsS --max-time 10 -H "$SA_COOKIE" "$SA_API/api/v1/installations")"
+              actual_enabled="$(printf '%s' "$installations_now" | jq -r --arg id "$installation_id" '.items[] | select(.id==$id) | .actual_enabled')"
+              sync_status="$(printf '%s' "$installations_now" | jq -r --arg id "$installation_id" '.items[] | select(.id==$id) | .sync_status')"
+              applied_revision="$(printf '%s' "$installations_now" | jq -r --arg id "$installation_id" '.items[] | select(.id==$id) | .last_applied_revision')"
+
+              bindings="$(curl -fsS --max-time 10 -H "$SA_COOKIE" "$SA_API/api/v1/organization-products")"
+              desired_revision="$(printf '%s' "$bindings" | jq -r --arg org "$organization_id" '.items[] | select(.organization_id==$org and .product_code=="imds-marketing") | .desired_revision')"
+              binding_actual="$(printf '%s' "$bindings" | jq -r --arg org "$organization_id" '.items[] | select(.organization_id==$org and .product_code=="imds-marketing") | .actual_revision')"
+              binding_sync="$(printf '%s' "$bindings" | jq -r --arg org "$organization_id" '.items[] | select(.organization_id==$org and .product_code=="imds-marketing") | .sync_status')"
+
+              remote="$(curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" "$MARKETING_API/internal/platform/state")"
+              remote_enabled="$(printf '%s' "$remote" | jq -r --arg tenant "$tenant_id" --arg code "$MODULE_CODE" '.tenants[$tenant].modules[$code]')"
+              remote_revision="$(printf '%s' "$remote" | jq -r --arg tenant "$tenant_id" '.tenants[$tenant].revision')"
+
+              browser="$(curl -fsS --max-time 10 -H "Authorization: Bearer $MARKETING_TOKEN" -H "x-imds-company-id: $tenant_id" "$MARKETING_API/api/platform/entitlements")"
+              browser_enabled="$(printf '%s' "$browser" | jq -r --arg code "$MODULE_CODE" '.modules[$code]')"
+              browser_revision="$(printf '%s' "$browser" | jq -r '.revision')"
+
+              commands="$(curl -fsS --max-time 10 -H "$SA_COOKIE" "$SA_API/api/v1/control-commands")"
+              command_status="$(printf '%s' "$commands" | jq -r --argjson rev "$desired_revision" '.items[] | select(.product_code=="imds-marketing" and .desired_revision==$rev) | .status' | head -1)"
+
+              if [ "$actual_enabled" = "$expected" ] && [ "$sync_status" = synced ] && [ "$binding_sync" = synced ] && [ "$remote_enabled" = "$expected" ] && [ "$browser_enabled" = "$expected" ] && [ "$binding_actual" = "$desired_revision" ] && [ "$remote_revision" = "$desired_revision" ] && [ "$browser_revision" = "$desired_revision" ] && [ "$applied_revision" = "$desired_revision" ] && [ "$command_status" = succeeded ] && [ "$desired_revision" -gt "$start_revision" ]; then
+                echo "E2E_SYNCED expected=$expected revision=$desired_revision attempts=$attempt"
+                return 0
+              fi
+            done
+            echo "E2E sync failed expected=$expected" >&2
+            return 1
+          }
+
+          bindings_before="$(curl -fsS --max-time 10 -H "$SA_COOKIE" "$SA_API/api/v1/organization-products")"
+          revision_before="$(printf '%s' "$bindings_before" | jq -r --arg org "$organization_id" '.items[] | select(.organization_id==$org and .product_code=="imds-marketing") | .desired_revision')"
+          test "$revision_before" -ge 1
+
+          test_status=suspended
+          expected=false
+          if [ "$original_status" = suspended ]; then test_status=active; expected=true; fi
+
+          curl -fsS --max-time 15 -H "$SA_COOKIE" -H 'content-type: application/json' -X PATCH "$SA_API/api/v1/installations/$installation_id" --data "{\"status\":\"$test_status\"}" >/dev/null
+          assert_synced "$expected" "$revision_before"
+
+          bindings_mid="$(curl -fsS --max-time 10 -H "$SA_COOKIE" "$SA_API/api/v1/organization-products")"
+          revision_mid="$(printf '%s' "$bindings_mid" | jq -r --arg org "$organization_id" '.items[] | select(.organization_id==$org and .product_code=="imds-marketing") | .desired_revision')"
+
+          curl -fsS --max-time 15 -H "$SA_COOKIE" -H 'content-type: application/json' -X PATCH "$SA_API/api/v1/installations/$installation_id" --data "{\"status\":\"$original_status\"}" >/dev/null
+          original_expected=true; [ "$original_status" = suspended ] && original_expected=false
+          assert_synced "$original_expected" "$revision_mid"
+
+          echo "CONTROL_PLANE_E2E=success"
+          echo "ORIGINAL_STATUS_RESTORED=$original_status"
+          REMOTE
