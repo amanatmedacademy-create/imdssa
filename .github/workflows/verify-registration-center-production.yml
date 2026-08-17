@@ -1,0 +1,66 @@
+name: Verify Registration Center Production
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+      EXPECTED_SHA: 41f92c9c8f28fb5abad2649b1a15cc947fd50bc9
+    steps:
+      - name: Validate VPS secrets
+        run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Verify registration center production
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          deployed=''
+          for _ in $(seq 1 120); do
+            deployed="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "basename \"\$(readlink -f /var/www/imds-super-admin/current)\"" 2>/dev/null || true)"
+            if [ "$deployed" = "$EXPECTED_SHA" ]; then break; fi
+            sleep 5
+          done
+          test "$deployed" = "$EXPECTED_SHA"
+          echo "release=$deployed"
+
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          API=http://127.0.0.1:8788
+          EXPECTED_SHA=41f92c9c8f28fb5abad2649b1a15cc947fd50bc9
+          test "$(basename "$(readlink -f /var/www/imds-super-admin/current)")" = "$EXPECTED_SHA"
+          systemctl is-active --quiet imds-super-admin-api.service
+          curl -fsS "$API/healthz" >/dev/null
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.notification_delivery_settings') is not null" | grep -q '^t$'
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.registration_notifications') is not null" | grep -q '^t$'
+
+          TOKEN="$(openssl rand -hex 32)"
+          TOKEN_HASH="$(printf '%s' "$TOKEN" | sha256sum | awk '{print $1}')"
+          ADMIN_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end, created_at limit 1")"
+          test -n "$ADMIN_ID"
+          cleanup(){ sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$TOKEN_HASH'" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          sudo -u postgres psql --dbname=imdssa --command="insert into app.auth_sessions(user_id,token_hash,expires_at) values ('$ADMIN_ID'::uuid,'$TOKEN_HASH',now()+interval '10 minutes')" >/dev/null
+          curl -fsS -H "Cookie: imdssa_session=$TOKEN" "$API/api/v1/notifications?limit=5" | grep -q '"items"'
+          settings="$(curl -fsS -H "Cookie: imdssa_session=$TOKEN" "$API/api/v1/settings/notifications/telegram")"
+          printf '%s' "$settings" | grep -q '"configured"'
+          if printf '%s' "$settings" | grep -q 'botToken'; then echo 'secret field leaked' >&2; exit 1; fi
+
+          grep -R -q 'Регистрации' "/var/www/imds-super-admin/current/assets"
+          grep -R -q 'Настройки уведомлений' "/var/www/imds-super-admin/current/assets"
+          grep -R -q 'Telegram подключён' "/var/www/imds-super-admin/current/assets"
+          echo 'registration_center_production=passed'
+          REMOTE
