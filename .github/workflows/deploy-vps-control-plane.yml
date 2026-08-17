@@ -66,15 +66,15 @@ jobs:
         run: |
           set -euo pipefail
           SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
-          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" '
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo bash -c '
             set -euo pipefail
             source /etc/imds-platform-control.env
-            test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
-            curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info | grep -q '"product":"imds-marketing"'
-            curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/tenants | grep -q '"items"'
+            test -n \"\$IMDS_PLATFORM_CONTROL_TOKEN\"
+            curl -fsS --max-time 10 -H \"Authorization: Bearer \$IMDS_PLATFORM_CONTROL_TOKEN\" http://127.0.0.1:8787/internal/platform/info | grep -q '\"product\":\"imds-marketing\"'
+            curl -fsS --max-time 10 -H \"Authorization: Bearer \$IMDS_PLATFORM_CONTROL_TOKEN\" http://127.0.0.1:8787/internal/platform/tenants | grep -q '\"items\"'
             systemctl is-active --quiet imdssa-reconcile.timer
             systemctl is-active --quiet imdssa-product-monitor.timer
-          '
+          '"
       - name: Verify public endpoint
         run: |
           curl -fsS --max-time 20 "http://$VPS_HOST:8080/healthz"

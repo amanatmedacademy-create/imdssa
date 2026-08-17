@@ -40,6 +40,13 @@ fi
 chown root:imdssa "$ENV_DIR/postgres.env"
 chmod 0640 "$ENV_DIR/postgres.env"
 
+# The reconciliation and health workers touch the same control-plane tables that
+# migration 004 installs triggers on. Pause them briefly before DDL so repeat
+# deploys cannot deadlock with a live worker transaction. Commands remain durable
+# in PostgreSQL and are resumed after the migration completes.
+systemctl stop imdssa-reconcile.timer imdssa-reconcile.service 2>/dev/null || true
+systemctl stop imdssa-product-monitor.timer imdssa-product-monitor.service 2>/dev/null || true
+
 install -d -o root -g postgres -m 0750 "$APP_DIR/migrations"
 for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql; do
   install -o root -g postgres -m 0640 "$STAGE_DIR/$migration" "$APP_DIR/migrations/$migration"
