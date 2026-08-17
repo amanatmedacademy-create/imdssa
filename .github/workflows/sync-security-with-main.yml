@@ -52,38 +52,34 @@ jobs:
               "import pg from 'pg';\nimport { handleInternalRegistrationEvent } from './registrationNotifications.js';\nimport { createSessionToken, hashPassword, hashToken, validatePassword, verifyPassword } from './security.js';",
               'registration import',
           )
-          health_to_login = """  if (url.pathname === '/healthz') {
-            const db = await pool.query('select current_database() as database, now() as time');
-            return json(res, 200, { status: 'healthy', service: 'imdssa-api', database: db.rows[0].database, time: db.rows[0].time });
-          }
-
-          if (url.pathname === '/api/auth/login' && method === 'POST') {
-          """.replace('          ', '')
-          health_with_registration = health_to_login.replace(
-              "\n  if (url.pathname === '/api/auth/login' && method === 'POST') {\n",
-              "\n  if (await handleInternalRegistrationEvent(req, res, pool, url, method)) return;\n\n  if (url.pathname === '/api/auth/login' && method === 'POST') {\n",
+          login_marker = "  if (url.pathname === '/api/auth/login' && method === 'POST') {\n"
+          text = replace_once(
+              text,
+              login_marker,
+              "  if (await handleInternalRegistrationEvent(req, res, pool, url, method)) return;\n\n" + login_marker,
+              'internal registration handler',
           )
-          text = replace_once(text, health_to_login, health_with_registration, 'internal registration handler')
           notification_routes = """
 
-          if (url.pathname === '/api/v1/notifications' && method === 'GET') {
-            const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 20), 1), 100);
-            const result = await pool.query(`select id,event_id,source_product_code,external_tenant_id,organization_id,company_name,owner_name,owner_email,owner_phone,
-              trial_status,trial_started_at,trial_ends_at,telegram_status,telegram_error,read_at,created_at
-              from app.registration_notifications order by created_at desc limit $1`, [limit]);
-            const unread = await pool.query('select count(*)::int as count from app.registration_notifications where read_at is null');
-            return json(res, 200, { items: result.rows, unread: unread.rows[0]?.count || 0 });
-          }
+if (url.pathname === '/api/v1/notifications' && method === 'GET') {
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 20), 1), 100);
+  const result = await pool.query(`select id,event_id,source_product_code,external_tenant_id,organization_id,company_name,owner_name,owner_email,owner_phone,
+    trial_status,trial_started_at,trial_ends_at,telegram_status,telegram_error,read_at,created_at
+    from app.registration_notifications order by created_at desc limit $1`, [limit]);
+  const unread = await pool.query('select count(*)::int as count from app.registration_notifications where read_at is null');
+  return json(res, 200, { items: result.rows, unread: unread.rows[0]?.count || 0 });
+}
 
-          const notificationReadMatch = url.pathname.match(/^\/api\/v1\/notifications\/([0-9a-f-]+)\/read$/i);
-          if (notificationReadMatch && method === 'PATCH') {
-            const result = await pool.query('update app.registration_notifications set read_at=coalesce(read_at,now()),updated_at=now() where id=$1 returning id,read_at', [notificationReadMatch[1]]);
-            if (!result.rowCount) return json(res, 404, { error: 'NOTIFICATION_NOT_FOUND' });
-            return json(res, 200, result.rows[0]);
-          }
-          """.replace('          ', '')
+const notificationReadMatch = url.pathname.match(/^\/api\/v1\/notifications\/([0-9a-f-]+)\/read$/i);
+if (notificationReadMatch && method === 'PATCH') {
+  const result = await pool.query('update app.registration_notifications set read_at=coalesce(read_at,now()),updated_at=now() where id=$1 returning id,read_at', [notificationReadMatch[1]]);
+  if (!result.rowCount) return json(res, 404, { error: 'NOTIFICATION_NOT_FOUND' });
+  return json(res, 200, result.rows[0]);
+}
+"""
+          notification_routes = '\n'.join(('  ' + line if line else line) for line in notification_routes.strip('\n').split('\n')) + '\n'
           sse_close = "    return;\n  }\n\n  const user = await requireUser(req, res); if (!user) return;\n"
-          text = replace_once(text, sse_close, sse_close + notification_routes, 'notification routes')
+          text = replace_once(text, sse_close, sse_close + '\n' + notification_routes, 'notification routes')
           p.write_text(text)
 
           p = Path('deploy/vps/deploy-control-plane.sh')
