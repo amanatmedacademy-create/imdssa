@@ -1,0 +1,80 @@
+name: Verify Security Production
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+      EXPECTED_SHA: b3905f97ad1e383a3e8f332fb7b0a106ea05db24
+    steps:
+      - name: Validate VPS secrets
+        run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Verify merged production release
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+
+          deployed=''
+          for _ in $(seq 1 120); do
+            deployed="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "basename \"\$(readlink -f /var/www/imds-super-admin/current)\"" 2>/dev/null || true)"
+            if [ "$deployed" = "$EXPECTED_SHA" ]; then
+              break
+            fi
+            sleep 5
+          done
+          test "$deployed" = "$EXPECTED_SHA"
+          echo "release=$deployed"
+
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "EXPECTED_SHA='$EXPECTED_SHA' sudo -E bash -s" <<'REMOTE'
+          set -euo pipefail
+          API=http://127.0.0.1:8788
+
+          test "$(basename "$(readlink -f /var/www/imds-super-admin/current)")" = "$EXPECTED_SHA"
+          test -d "/opt/imds-super-admin/releases/$EXPECTED_SHA"
+          systemctl is-active --quiet imds-super-admin-api.service
+          systemctl is-active --quiet imdssa-reconcile.timer
+          systemctl is-active --quiet imdssa-product-monitor.timer
+          curl -fsS --max-time 10 "$API/healthz" >/dev/null
+
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --set=ON_ERROR_STOP=1 --command="select to_regclass('app.login_attempts') is not null" | grep -q '^t$'
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --set=ON_ERROR_STOP=1 --command="select count(*) from information_schema.columns where table_schema='app' and table_name='platform_users' and column_name in ('failed_login_attempts','locked_until','password_changed_at','last_login_ip')" | grep -q '^4$'
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --set=ON_ERROR_STOP=1 --command="select count(*) from information_schema.columns where table_schema='app' and table_name='auth_sessions' and column_name in ('source_ip','user_agent')" | grep -q '^2$'
+
+          TOKEN="$(openssl rand -hex 32)"
+          TOKEN_HASH="$(printf '%s' "$TOKEN" | sha256sum | awk '{print $1}')"
+          ADMIN_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end, created_at limit 1")"
+          test -n "$ADMIN_ID"
+          cleanup() {
+            sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$TOKEN_HASH'" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 --command="insert into app.auth_sessions(user_id,token_hash,expires_at,source_ip,user_agent) values ('$ADMIN_ID'::uuid,'$TOKEN_HASH',now()+interval '10 minutes','127.0.0.1'::inet,'production-verifier')" >/dev/null
+
+          for route in /api/auth/me /api/v1/overview /api/v1/notifications /api/v1/audit; do
+            curl -fsS --max-time 10 -H "Cookie: imdssa_session=$TOKEN" "$API$route" >/dev/null
+          done
+
+          headers="$(curl -sSI --max-time 10 http://127.0.0.1:8080/)"
+          printf '%s\n' "$headers" | grep -qi '^X-Content-Type-Options: nosniff'
+          printf '%s\n' "$headers" | grep -qi '^X-Frame-Options: DENY'
+          printf '%s\n' "$headers" | grep -qi '^Referrer-Policy: no-referrer'
+          printf '%s\n' "$headers" | grep -qi '^Permissions-Policy:'
+
+          source /etc/imds-platform-control.env
+          test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
+          curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info | grep -q 'imds-marketing'
+
+          echo 'security_production_verification=passed'
+          REMOTE
