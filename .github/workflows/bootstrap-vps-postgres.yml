@@ -3,7 +3,7 @@ name: Bootstrap VPS PostgreSQL
 on:
   workflow_dispatch:
   push:
-    branches: [agent/vps-control-plane]
+    branches: [main]
     paths:
       - deploy/vps/bootstrap-postgres.sh
       - deploy/vps/migrations/**
