@@ -1,0 +1,46 @@
+name: Apply Verified VPS Admin Reset
+
+on:
+  push:
+    branches:
+      - agent/vps-control-plane
+    paths:
+      - .github/workflows/apply-verified-vps-admin-reset.yml
+
+permissions:
+  contents: read
+
+jobs:
+  reset-admin:
+    runs-on: ubuntu-latest
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+      RESET_CIPHERTEXT: KP1Rxvfx+M53CWY+ToZfuIO1XomgRdID2SXtFqpGgl89zgUG8fSNsRXavwMaFRdK+U7Is+wws8VsQsuwuhlxhMaRREfkP7THYGWFlxwchK7XH2KpfiTY+u8Gkh50KEGXneCWSmG+PHH8ux0L+98df9AxLk+uwEm70WxpEGZGWSg/IoaUpAx7CJJZ4lYTX0kipYXSD3hFDfbIBbvs0yEwuBSIMVZN5gqKagUF7cCcSKNXziw3zuZl6+Xv2hi4y+WrllCJZFYMVE/Yrk35N1LRtkQuzfA/4QyT4PlkWjcHtgg2bdcYOmuUDgLnMpxk1DxEO5IajQ0jI3mrG2sLxcytoRlABipKpb1OChSyF+HG8NV4ucYtmxLQyT5cloDSf8BslWgP6VPoXq+3PEXdIwv1uo6bwUfUlUhZRGNg9HN0SwOG+HChs91Lvq/xYO2//lhtAD0Oo7Gr6dbTKjN7EXTticW+xE7ahO9r2Syek9vZBXGc9QB0SudZG4NvHmAi7ICV
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Apply and verify credentials
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          printf '%s' "$RESET_CIPHERTEXT" | base64 -d > /tmp/imdssa-reset.bin
+          sshpass -e scp "${SSH_ARGS[@]}" /tmp/imdssa-reset.bin "$VPS_USER@$VPS_HOST:/tmp/imdssa-reset.bin"
+          sshpass -e scp "${SSH_ARGS[@]}" deploy/vps/apply-admin-reset.sh "$VPS_USER@$VPS_HOST:/tmp/apply-admin-reset.sh"
+          rm -f /tmp/imdssa-reset.bin
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" '
+            set -euo pipefail
+            sudo install -d -m 0700 /root/imdssa-admin-reset
+            sudo mv /root/imdssa-admin-verify/private.pem /root/imdssa-admin-reset/private.pem
+            sudo mv /root/imdssa-admin-verify/public.pem /root/imdssa-admin-reset/public.pem
+            sudo install -m 0700 /tmp/apply-admin-reset.sh /root/imdssa-admin-reset/apply-admin-reset.sh
+            sudo /root/imdssa-admin-reset/apply-admin-reset.sh
+            sudo rm -f /root/imdssa-admin-reset/apply-admin-reset.sh /tmp/apply-admin-reset.sh
+          '
+      - name: Verify public service
+        run: curl -fsS --max-time 20 "http://$VPS_HOST:8080/healthz" >/dev/null
