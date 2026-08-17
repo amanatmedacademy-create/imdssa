@@ -2,6 +2,7 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { handleInternalRegistrationEvent } from './registrationNotifications.js';
+import { handleNotificationSettingsApi } from './notificationSettings.js';
 import { createSessionToken, hashPassword, hashToken, validatePassword, verifyPassword } from './security.js';
 
 const { Pool, Client } = pg;
@@ -197,6 +198,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
 
   const user = await requireUser(req, res); if (!user) return;
+
+  if (await handleNotificationSettingsApi(req, res, pool, url, method, user)) return;
 
   if (url.pathname === '/api/v1/notifications' && method === 'GET') {
     const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 20), 1), 100);

@@ -1,4 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { RegistrationCenter } from '../features/registrations/RegistrationCenter';
+import { TelegramNotificationSettings } from '../features/settings/TelegramNotificationSettings';
 import './vps.css';
 
 type User = { id: string; email: string; fullName: string; role: string };
@@ -9,22 +11,24 @@ type Module = { id: string; code: string; name: string; status: string; current_
 type Installation = { id: string; organization_id: string; module_id: string; host_product_id: string; organization_name: string; module_code: string; module_name: string; host_product_name: string; status: string; health: string; version: string | null; actual_enabled: boolean | null; sync_status: string; last_applied_revision: number | null; updated_at: string };
 type OrganizationProduct = { organization_id: string; product_id: string; organization_name: string; product_name: string; product_code: string; status: string; remote_tenant_id: string | null; desired_revision: number | null; actual_revision: number | null; sync_status: string | null; last_sync_at: string | null; last_error: string | null };
 type ControlCommand = { id: string; command_type: string; desired_revision: number; status: string; attempts: number; last_error: string | null; organization_name: string; product_name: string; product_code: string; created_at: string; completed_at: string | null };
-type Tab = 'overview' | 'organizations' | 'products' | 'modules' | 'installations' | 'sync' | 'realtime' | 'security';
+type Tab = 'overview' | 'organizations' | 'registrations' | 'products' | 'modules' | 'installations' | 'sync' | 'realtime' | 'security' | 'settings';
 type RealtimeState = 'connecting' | 'online' | 'offline';
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'overview', label: 'Обзор' },
   { id: 'organizations', label: 'Организации' },
+  { id: 'registrations', label: 'Регистрации' },
   { id: 'products', label: 'Продукты' },
   { id: 'modules', label: 'Модули' },
   { id: 'installations', label: 'Установки' },
   { id: 'sync', label: 'Синхронизация' },
   { id: 'realtime', label: 'События' },
   { id: 'security', label: 'Безопасность' },
+  { id: 'settings', label: 'Настройки' },
 ];
 
 const tabTitles: Record<Tab, string> = {
-  overview: 'Обзор платформы', organizations: 'Организации', products: 'Продукты', modules: 'Управление модулями', installations: 'Установки модулей', sync: 'Синхронизация продуктов', realtime: 'События в реальном времени', security: 'Безопасность аккаунта',
+  overview: 'Обзор платформы', organizations: 'Организации', registrations: 'Новые регистрации', products: 'Продукты', modules: 'Управление модулями', installations: 'Установки модулей', sync: 'Синхронизация продуктов', realtime: 'События в реальном времени', security: 'Безопасность аккаунта', settings: 'Настройки уведомлений',
 };
 
 const statusLabels: Record<string, string> = {
@@ -158,6 +162,10 @@ export function VpsApp() {
   {tab === 'installations' && <><section className="vps-card"><div className="vps-card-head"><div><span>УСТАНОВКА</span><h2>Установить модуль</h2></div></div><form className="vps-form-grid" onSubmit={installModule}><label>Организация<select required value={installForm.organizationId} onChange={(e) => setInstallForm({ ...installForm, organizationId: e.target.value })}><option value="">Выберите</option>{organizations.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>Продукт<select required value={installForm.hostProductId} onChange={(e) => setInstallForm({ organizationId: installForm.organizationId, hostProductId: e.target.value, moduleId: '' })}><option value="">Выберите</option>{products.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>Модуль<select required value={installForm.moduleId} onChange={(e) => setInstallForm({ ...installForm, moduleId: e.target.value })}><option value="">Выберите</option>{availableModules.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label><button className="vps-action" disabled={busy}>Установить</button></form><p className="vps-note">Требуемое состояние записывается сразу. Фактически активным модуль считается только после подтверждения продукта.</p></section><section className="vps-card"><div className="vps-card-head"><div><span>ФАКТИЧЕСКОЕ СОСТОЯНИЕ</span><h2>Установки модулей</h2></div></div>{installations.length === 0 ? <EmptyState title="Активных установок нет" text="После установки здесь появятся требуемое, фактическое состояние и синхронизация." /> : <div className="vps-table-wrap"><table><thead><tr><th>Организация / модуль</th><th>Продукт</th><th>Требуется</th><th>Фактически</th><th>Синхронизация</th><th>Ревизия</th><th>Действие</th></tr></thead><tbody>{installations.map((x) => <tr key={x.id}><td><strong>{x.organization_name}</strong><small>{x.module_name}</small></td><td>{x.host_product_name}</td><td><Status value={x.status} /></td><td>{x.actual_enabled == null ? <Status value="unknown" /> : <Status value={x.actual_enabled ? 'active' : 'suspended'} />}</td><td><Status value={x.sync_status || 'pending'} /></td><td>{x.last_applied_revision ?? 0}</td><td><button className="vps-mini" disabled={busy} onClick={() => void setInstallationStatus(x.id, x.status === 'active' ? 'suspended' : 'active')}>{x.status === 'active' ? 'Отключить' : 'Включить'}</button></td></tr>)}</tbody></table></div>}</section></>}
 
   {tab === 'sync' && <section className="vps-card"><div className="vps-card-head"><div><span>КОМАНДЫ УПРАВЛЕНИЯ</span><h2>Требуется → Фактически</h2></div><Status value={(overview?.sync_pending ?? 0) === 0 ? 'synced' : 'pending'} /></div>{commands.length === 0 ? <EmptyState title="Команд пока нет" text="После изменения продукта или модуля здесь появится команда и подтверждение продукта." /> : <div className="vps-table-wrap"><table><thead><tr><th>Организация</th><th>Продукт</th><th>Команда</th><th>Ревизия</th><th>Статус</th><th>Попытки</th><th>Ошибка</th></tr></thead><tbody>{commands.map((x) => <tr key={x.id}><td>{x.organization_name}</td><td><strong>{x.product_name}</strong><small>{x.product_code}</small></td><td>{x.command_type}</td><td>{x.desired_revision}</td><td><Status value={x.status} /></td><td>{x.attempts}</td><td>{x.last_error ? <small className="vps-inline-error">{x.last_error}</small> : '—'}</td></tr>)}</tbody></table></div>}</section>}
+
+  {tab === 'registrations' && <RegistrationCenter />}
+
+  {tab === 'settings' && <TelegramNotificationSettings />}
 
   {tab === 'security' && <section className="vps-card"><div className="vps-card-head"><div><span>АККАУНТ</span><h2>Смена пароля</h2></div></div><form className="vps-form-grid" onSubmit={changePassword}><label>Текущий пароль<input type="password" autoComplete="current-password" required value={passwordForm.currentPassword} onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })} /></label><label>Новый пароль<input type="password" autoComplete="new-password" required minLength={16} value={passwordForm.newPassword} onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} /></label><label>Подтверждение<input type="password" autoComplete="new-password" required minLength={16} value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} /></label><button className="vps-action" disabled={busy}>Изменить пароль</button></form><p className="vps-note">Минимум 16 символов: строчная и заглавная буквы, цифра и специальный символ. После смены все остальные сессии будут отозваны.</p>{passwordMessage && <div className="vps-success">{passwordMessage}</div>}</section>}
 

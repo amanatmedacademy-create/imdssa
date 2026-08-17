@@ -45,6 +45,7 @@ jobs:
           cp deploy/vps/migrations/004_control_plane_sync.sql .deploy-stage/004_control_plane_sync.sql
           cp deploy/vps/migrations/005_registration_notifications.sql .deploy-stage/005_registration_notifications.sql
           cp deploy/vps/migrations/005_security_hardening.sql .deploy-stage/005_security_hardening.sql
+          cp deploy/vps/migrations/007_notification_delivery_settings.sql .deploy-stage/007_notification_delivery_settings.sql
           cp deploy/vps/nginx-super-admin.conf .deploy-stage/nginx.conf
           cp deploy/vps/deploy-control-plane.sh .deploy-stage/deploy-control-plane.sh
           cp deploy/vps/product-monitor.sh .deploy-stage/product-monitor.sh
@@ -81,7 +82,7 @@ jobs:
             sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$TOKEN_HASH'" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          for route in /api/auth/me /api/v1/overview /api/v1/control-commands /api/v1/notifications; do
+          for route in /api/auth/me /api/v1/overview /api/v1/control-commands /api/v1/notifications /api/v1/settings/notifications/telegram; do
             curl -fsS --max-time 15 -H "Cookie: imdssa_session=$TOKEN" "$API$route" >/dev/null
           done
           REMOTE
