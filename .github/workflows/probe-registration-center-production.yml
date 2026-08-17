@@ -1,0 +1,31 @@
+name: Probe Registration Center Production
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Probe current VPS release
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "release=$(basename "$(readlink -f /var/www/imds-super-admin/current)")"
+          echo "api=$(systemctl is-active imds-super-admin-api.service)"
+          echo "settings_table=$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select case when to_regclass('app.notification_delivery_settings') is null then 'missing' else 'present' end")"
+          REMOTE
