@@ -38,7 +38,8 @@ jobs:
           SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
           sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" '
             set -euo pipefail
-            sudo -u postgres psql -d imdssa -Atc "select email || ''|'' || global_role || ''|'' || is_active from app.platform_users where global_role=''platform_owner'' order by created_at asc limit 1" | sed "s/^/CURRENT_ADMIN=/"
+            sudo -u postgres psql -d imdssa -Atc "select email from app.platform_users where global_role='"'"'platform_owner'"'"' order by created_at asc limit 1" | sed "s/^/CURRENT_ADMIN_EMAIL=/"
+            sudo -u postgres psql -d imdssa -Atc "select is_active from app.platform_users where global_role='"'"'platform_owner'"'"' order by created_at asc limit 1" | sed "s/^/CURRENT_ADMIN_ACTIVE=/"
             sudo install -d -m 0700 /root/imdssa-admin-verify
             sudo openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out /root/imdssa-admin-verify/private.pem >/dev/null 2>&1
             sudo chmod 0600 /root/imdssa-admin-verify/private.pem
