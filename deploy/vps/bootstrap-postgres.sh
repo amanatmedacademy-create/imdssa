@@ -38,7 +38,7 @@ PG_CLUSTER="$(printf '%s\n' "$cluster_line" | awk '{print $2}')"
 CONF_DIR="/etc/postgresql/$PG_VERSION/$PG_CLUSTER"
 POSTGRES_CONF="$CONF_DIR/postgresql.conf"
 
-install -d -m 0750 "$APP_DIR/migrations"
+install -d -o root -g postgres -m 0750 "$APP_DIR/migrations"
 install -d -m 0750 "$ENV_DIR"
 install -d -o postgres -g postgres -m 0750 "$BACKUP_DIR"
 
@@ -104,6 +104,8 @@ if [ ! -f "$MIGRATION_FILE" ]; then
   exit 1
 fi
 
+chown root:postgres "$MIGRATION_FILE"
+chmod 0640 "$MIGRATION_FILE"
 sudo -u postgres psql --set=ON_ERROR_STOP=1 --dbname=imdssa --file="$MIGRATION_FILE"
 
 cat > /usr/local/sbin/imds-postgres-backup <<'EOF'
