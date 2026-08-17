@@ -1,7 +1,7 @@
 name: Deploy VPS Control Plane
 on:
   push:
-    branches: [main, 'agent/vps-control-plane']
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
