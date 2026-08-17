@@ -52,13 +52,18 @@ jobs:
               "import pg from 'pg';\nimport { handleInternalRegistrationEvent } from './registrationNotifications.js';\nimport { createSessionToken, hashPassword, hashToken, validatePassword, verifyPassword } from './security.js';",
               'registration import',
           )
-          health = """  if (url.pathname === '/healthz') {
+          health_to_login = """  if (url.pathname === '/healthz') {
             const db = await pool.query('select current_database() as database, now() as time');
             return json(res, 200, { status: 'healthy', service: 'imdssa-api', database: db.rows[0].database, time: db.rows[0].time });
           }
+
+          if (url.pathname === '/api/auth/login' && method === 'POST') {
           """.replace('          ', '')
-          text = replace_once(text, health, health + "\n  if (await handleInternalRegistrationEvent(req, res, pool, url, method)) return;\n", 'internal registration handler')
-          user_marker = "  const user = await requireUser(req, res); if (!user) return;\n"
+          health_with_registration = health_to_login.replace(
+              "\n  if (url.pathname === '/api/auth/login' && method === 'POST') {\n",
+              "\n  if (await handleInternalRegistrationEvent(req, res, pool, url, method)) return;\n\n  if (url.pathname === '/api/auth/login' && method === 'POST') {\n",
+          )
+          text = replace_once(text, health_to_login, health_with_registration, 'internal registration handler')
           notification_routes = """
 
           if (url.pathname === '/api/v1/notifications' && method === 'GET') {
@@ -77,7 +82,6 @@ jobs:
             return json(res, 200, result.rows[0]);
           }
           """.replace('          ', '')
-          # Insert only after the post-SSE authenticated user gate, not the auth endpoints.
           sse_close = "    return;\n  }\n\n  const user = await requireUser(req, res); if (!user) return;\n"
           text = replace_once(text, sse_close, sse_close + notification_routes, 'notification routes')
           p.write_text(text)
