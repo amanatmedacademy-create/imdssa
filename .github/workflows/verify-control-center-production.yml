@@ -1,0 +1,40 @@
+name: Verify Control Center Production
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+      EXPECTED_SHA: dec4c051c160c11ed226992806a2d6ee7032520b
+    steps:
+      - name: Validate VPS secrets
+        run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Verify Control Center production release
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          deployed=''
+          for _ in $(seq 1 120); do
+            deployed="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "basename \"\$(readlink -f /var/www/imds-super-admin/current)\"" 2>/dev/null || true)"
+            if [ "$deployed" = "$EXPECTED_SHA" ]; then
+              break
+            fi
+            sleep 5
+          done
+          test "$deployed" = "$EXPECTED_SHA"
+          echo "release=$deployed"
+          page="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "curl -fsS --max-time 10 http://127.0.0.1:8080/")"
+          printf '%s' "$page" | grep -q '<title>IMDS Control Center</title>'
+          echo 'control_center_production=passed'
