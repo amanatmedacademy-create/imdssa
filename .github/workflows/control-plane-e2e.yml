@@ -21,10 +21,8 @@ jobs:
     steps:
       - name: Validate VPS access
         run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
-
       - name: Install SSH client
         run: sudo apt-get update && sudo apt-get install -y sshpass
-
       - name: Verify desired to actual entitlement lifecycle
         shell: bash
         env:
@@ -59,7 +57,6 @@ jobs:
 
           source /etc/imds-platform-control.env
           test -n "${IMDS_PLATFORM_CONTROL_TOKEN:-}"
-
           remote_state="$(curl -fsS --max-time 15 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" "$MARKETING_API/internal/platform/state")"
           tenant_id="$(printf '%s' "$remote_state" | jq -r --arg org "$organization_id" '.tenants | to_entries[] | select(.value.organizationId==$org) | .key' | head -1)"
           test -n "$tenant_id" && test "$tenant_id" != null
@@ -117,8 +114,8 @@ jobs:
               browser_enabled="$(printf '%s' "$browser" | jq -r --arg code "$MODULE_CODE" '.modules[$code]')"
               browser_revision="$(printf '%s' "$browser" | jq -r '.revision')"
 
-              commands="$(curl -fsS --max-time 10 -H "$SA_COOKIE" "$SA_API/api/v1/control-commands")"
-              command_status="$(printf '%s' "$commands" | jq -r --argjson rev "$desired_revision" --arg org "$ORGANIZATION_NAME" '.items[] | select(.product_code=="imds-marketing" and .organization_name==$org and .desired_revision==$rev) | .status' | head -1)"
+              command_status="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --set=org="$organization_id" --set=rev="$desired_revision" --command="select c.status from app.control_commands c join app.products p on p.id=c.product_id where c.organization_id=:'org'::uuid and p.code='imds-marketing' and c.desired_revision=:'rev'::bigint order by c.created_at desc limit 1")"
+              command_status="$(printf '%s' "$command_status" | xargs)"
 
               echo "E2E_STATE attempt=$attempt expected=$expected start=$start_revision desired=$desired_revision actual_enabled=$actual_enabled installation_sync=$sync_status applied_revision=$applied_revision binding_actual=$binding_actual binding_sync=$binding_sync remote_enabled=$remote_enabled remote_revision=$remote_revision browser_enabled=$browser_enabled browser_revision=$browser_revision command=$command_status"
 
