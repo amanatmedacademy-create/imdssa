@@ -7,11 +7,11 @@ SERVICE_NAME="imds-marketing.service"
 ADAPTER_BASE_URL="http://127.0.0.1:8787"
 HEALTHCHECK_URL="$ADAPTER_BASE_URL/api/health"
 
-started_ms="$(date +%s%3N)"
 health="offline"
 last_error="Marketing service is not running"
 version=""
 heartbeat_sql="NULL"
+latency_ms="0"
 
 service_state="$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || true)"
 if [ "$service_state" = "active" ]; then
@@ -20,7 +20,14 @@ if [ "$service_state" = "active" ]; then
   if [ -n "$main_pid" ] && [ "$main_pid" != "0" ] && [ -e "/proc/$main_pid/cwd" ]; then
     version="$(basename "$(readlink -f "/proc/$main_pid/cwd" 2>/dev/null || true)")"
   fi
-  http_code="$(curl -sS -o /tmp/imdssa-marketing-health.json -w '%{http_code}' --max-time 4 "$HEALTHCHECK_URL" || true)"
+
+  curl_metrics="$(curl -sS -o /tmp/imdssa-marketing-health.json -w '%{http_code}|%{time_total}' --max-time 4 "$HEALTHCHECK_URL" || true)"
+  http_code="${curl_metrics%%|*}"
+  time_total="${curl_metrics#*|}"
+  if [[ "$time_total" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    latency_ms="$(awk -v seconds="$time_total" 'BEGIN { printf "%d", (seconds * 1000) + 0.5 }')"
+  fi
+
   if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
     health="healthy"
     last_error=""
@@ -34,9 +41,6 @@ if [ "$service_state" = "active" ]; then
   fi
 fi
 rm -f /tmp/imdssa-marketing-health.json
-
-finished_ms="$(date +%s%3N)"
-latency_ms="$((finished_ms - started_ms))"
 
 sudo -u postgres psql \
   --set=ON_ERROR_STOP=1 \
