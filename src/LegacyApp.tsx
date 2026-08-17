@@ -15,6 +15,22 @@ import { OperationsProvider } from './features/operations/OperationsContext';
 import { ProductCatalogProvider } from './features/products/ProductCatalogContext';
 import { SecurityProvider } from './features/security/SecurityContext';
 import { SupportProvider } from './features/support/SupportContext';
+import './styles.css';
+import './productRegistry.css';
+import './controlPlane.css';
+import './productCatalog.css';
+import './billing.css';
+import './billingOperations.css';
+import './identity.css';
+import './operations.css';
+import './security.css';
+import './observability.css';
+import './productAnalytics.css';
+import './support.css';
+import './governance.css';
+import './moduleRuntime.css';
+import './frontendFixes.css';
+import './moduleUiFixes.css';
 
 export function LegacyApp() {
   return (
