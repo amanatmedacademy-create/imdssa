@@ -27,6 +27,8 @@ jobs:
           test -n "$VPS_USER"
           test -n "$VPS_PASSWORD"
 
+      - uses: actions/checkout@v4
+
       - name: Install SSH client
         run: sudo apt-get update && sudo apt-get install -y sshpass
 
@@ -39,16 +41,9 @@ jobs:
           SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=20 -o ServerAliveCountMax=30)
           printf '%s' "$RESET_CIPHERTEXT" | base64 -d > /tmp/imdssa-reset.bin
           sshpass -e scp "${SSH_ARGS[@]}" /tmp/imdssa-reset.bin "$VPS_USER@$VPS_HOST:/tmp/imdssa-reset.bin"
+          sshpass -e scp "${SSH_ARGS[@]}" deploy/vps/apply-admin-reset.sh "$VPS_USER@$VPS_HOST:/tmp/apply-admin-reset.sh"
           rm -f /tmp/imdssa-reset.bin
-          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" '
-            set -euo pipefail
-            sudo openssl pkeyutl -decrypt -inkey /root/imdssa-admin-reset/private.pem -in /tmp/imdssa-reset.bin -out /root/imdssa-admin-reset/reset.env -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256
-            sudo chmod 0600 /root/imdssa-admin-reset/reset.env
-            sudo bash -c '\''set -euo pipefail; source /root/imdssa-admin-reset/reset.env; sudo -u postgres psql --set=ON_ERROR_STOP=1 --set=admin_email="$EMAIL" --set=password_hash="$PASSWORD_HASH" --dbname=imdssa --command="UPDATE app.platform_users SET email=:'\''\''admin_email'\''\'', password_hash=:'\''\''password_hash'\''\'', full_name='\''\''IMDS Platform Owner'\''\'', global_role='\''\''platform_owner'\''\'', is_active=true, updated_at=now() WHERE id=(SELECT id FROM app.platform_users WHERE global_role='\''\''platform_owner'\''\'' ORDER BY created_at ASC LIMIT 1); DELETE FROM app.auth_sessions;"'\''
-            sudo rm -f /root/imdssa-admin-reset/reset.env /root/imdssa-admin-reset/private.pem /root/imdssa-admin-reset/public.pem /tmp/imdssa-reset.bin
-            sudo systemctl restart imds-super-admin-api.service
-            curl -fsS http://127.0.0.1:8788/healthz >/dev/null
-          '
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo install -m 0700 /tmp/apply-admin-reset.sh /root/imdssa-admin-reset/apply-admin-reset.sh && sudo /root/imdssa-admin-reset/apply-admin-reset.sh && sudo rm -f /root/imdssa-admin-reset/apply-admin-reset.sh /tmp/apply-admin-reset.sh'
 
       - name: Verify public service
         shell: bash
