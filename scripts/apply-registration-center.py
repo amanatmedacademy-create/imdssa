@@ -62,19 +62,11 @@ s = one(s,
     'ui panels')
 p.write_text(s)
 
-# Production deployment includes settings schema.
+# Production deployment includes settings schema. The workflow staging file is updated separately via GitHub connector.
 p = Path('deploy/vps/deploy-control-plane.sh')
 s = p.read_text()
 s = one(s,
     '005_registration_notifications.sql 005_security_hardening.sql; do',
     '005_registration_notifications.sql 005_security_hardening.sql 007_notification_delivery_settings.sql; do',
     'deploy migration list')
-p.write_text(s)
-
-p = Path('.github/workflows/deploy-vps-control-plane.yml')
-s = p.read_text()
-s = one(s,
-    '          cp deploy/vps/migrations/005_security_hardening.sql .deploy-stage/005_security_hardening.sql\n',
-    '          cp deploy/vps/migrations/005_security_hardening.sql .deploy-stage/005_security_hardening.sql\n          cp deploy/vps/migrations/007_notification_delivery_settings.sql .deploy-stage/007_notification_delivery_settings.sql\n',
-    'workflow migration stage')
 p.write_text(s)
