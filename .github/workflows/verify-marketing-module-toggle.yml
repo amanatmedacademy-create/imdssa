@@ -1,0 +1,72 @@
+name: Verify Marketing Module Toggle
+
+on:
+  push:
+    branches: ['agent/vps-control-plane']
+    paths: ['.github/workflows/verify-marketing-module-toggle.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Toggle analytics off and on through Super Admin API
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          command -v jq >/dev/null 2>&1 || { apt-get update >/dev/null && apt-get install -y jq >/dev/null; }
+          API=http://127.0.0.1:8788
+          TENANT_ID=4cd22020-6f1d-4afb-9266-b01c96e4a927
+          MODULE_CODE=marketing.analytics
+
+          ADMIN_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end, created_at limit 1")"
+          test -n "$ADMIN_ID"
+          SESSION_TOKEN="$(openssl rand -hex 32)"
+          SESSION_HASH="$(printf '%s' "$SESSION_TOKEN" | sha256sum | awk '{print $1}')"
+          sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 --command="insert into app.auth_sessions(user_id,token_hash,expires_at) values ('$ADMIN_ID'::uuid,'$SESSION_HASH',now()+interval '10 minutes')" >/dev/null
+          cleanup() { sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$SESSION_HASH'" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          COOKIE="Cookie: imdssa_session=$SESSION_TOKEN"
+
+          inst="$(curl -fsS -H "$COOKIE" "$API/api/v1/installations")"
+          installation_id="$(printf '%s' "$inst" | jq -r --arg code "$MODULE_CODE" '.items[] | select(.module_code==$code and .organization_name=="Amanat Med Academy") | .id' | head -1)"
+          test -n "$installation_id" && test "$installation_id" != null
+
+          source /etc/imds-platform-control.env
+          assert_marketing_state() {
+            expected="$1"
+            for attempt in $(seq 1 20); do
+              systemctl start imdssa-reconcile.service || true
+              sleep 1
+              state="$(curl -fsS -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/state)"
+              value="$(printf '%s' "$state" | jq -r --arg tenant "$TENANT_ID" --arg code "$MODULE_CODE" '.tenants[$tenant].modules[$code]')"
+              if [ "$value" = "$expected" ]; then return 0; fi
+              sleep 1
+            done
+            echo "Marketing state did not become $expected" >&2
+            return 1
+          }
+
+          curl -fsS -H "$COOKIE" -H 'content-type: application/json' -X PATCH "$API/api/v1/installations/$installation_id" --data '{"status":"suspended"}' >/dev/null
+          assert_marketing_state false
+          echo 'ANALYTICS_OFF_CONFIRMED=true'
+
+          curl -fsS -H "$COOKIE" -H 'content-type: application/json' -X PATCH "$API/api/v1/installations/$installation_id" --data '{"status":"active"}' >/dev/null
+          assert_marketing_state true
+          echo 'ANALYTICS_ON_CONFIRMED=true'
+          REMOTE
