@@ -73,14 +73,18 @@ jobs:
           restore_status() {
             current="$(curl -fsS --max-time 10 -H "$SA_COOKIE" "$SA_API/api/v1/installations" | jq -r --arg id "$installation_id" '.items[] | select(.id==$id) | .status' | head -1 || true)"
             if [ "$current" != "$original_status" ]; then
+              echo "RESTORE desired_status=$original_status current_status=$current"
               curl -fsS --max-time 15 -H "$SA_COOKIE" -H 'content-type: application/json' -X PATCH "$SA_API/api/v1/installations/$installation_id" --data "{\"status\":\"$original_status\"}" >/dev/null || true
-              for _ in $(seq 1 25); do
+              for restore_attempt in $(seq 1 25); do
                 systemctl start imdssa-reconcile.service >/dev/null 2>&1 || true
                 sleep 1
                 state="$(curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" "$MARKETING_API/internal/platform/state" 2>/dev/null || true)"
                 actual="$(printf '%s' "$state" | jq -r --arg tenant "$tenant_id" --arg code "$MODULE_CODE" '.tenants[$tenant].modules[$code]' 2>/dev/null || true)"
-                expected=true; [ "$original_status" = suspended ] && expected=false
-                [ "$actual" = "$expected" ] && break
+                expected_restore=true; [ "$original_status" = suspended ] && expected_restore=false
+                if [ "$actual" = "$expected_restore" ]; then
+                  echo "RESTORE_CONFIRMED expected=$expected_restore attempts=$restore_attempt"
+                  break
+                fi
               done
             fi
             sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$SA_TOKEN_HASH'" >/dev/null 2>&1 || true
@@ -114,7 +118,9 @@ jobs:
               browser_revision="$(printf '%s' "$browser" | jq -r '.revision')"
 
               commands="$(curl -fsS --max-time 10 -H "$SA_COOKIE" "$SA_API/api/v1/control-commands")"
-              command_status="$(printf '%s' "$commands" | jq -r --argjson rev "$desired_revision" '.items[] | select(.product_code=="imds-marketing" and .desired_revision==$rev) | .status' | head -1)"
+              command_status="$(printf '%s' "$commands" | jq -r --argjson rev "$desired_revision" --arg org "$ORGANIZATION_NAME" '.items[] | select(.product_code=="imds-marketing" and .organization_name==$org and .desired_revision==$rev) | .status' | head -1)"
+
+              echo "E2E_STATE attempt=$attempt expected=$expected start=$start_revision desired=$desired_revision actual_enabled=$actual_enabled installation_sync=$sync_status applied_revision=$applied_revision binding_actual=$binding_actual binding_sync=$binding_sync remote_enabled=$remote_enabled remote_revision=$remote_revision browser_enabled=$browser_enabled browser_revision=$browser_revision command=$command_status"
 
               if [ "$actual_enabled" = "$expected" ] && [ "$sync_status" = synced ] && [ "$binding_sync" = synced ] && [ "$remote_enabled" = "$expected" ] && [ "$browser_enabled" = "$expected" ] && [ "$binding_actual" = "$desired_revision" ] && [ "$remote_revision" = "$desired_revision" ] && [ "$browser_revision" = "$desired_revision" ] && [ "$applied_revision" = "$desired_revision" ] && [ "$command_status" = succeeded ] && [ "$desired_revision" -gt "$start_revision" ]; then
                 echo "E2E_SYNCED expected=$expected revision=$desired_revision attempts=$attempt"
@@ -133,6 +139,7 @@ jobs:
           expected=false
           if [ "$original_status" = suspended ]; then test_status=active; expected=true; fi
 
+          echo "E2E_BEGIN organization=$ORGANIZATION_NAME module=$MODULE_CODE original_status=$original_status test_status=$test_status revision_before=$revision_before"
           curl -fsS --max-time 15 -H "$SA_COOKIE" -H 'content-type: application/json' -X PATCH "$SA_API/api/v1/installations/$installation_id" --data "{\"status\":\"$test_status\"}" >/dev/null
           assert_synced "$expected" "$revision_before"
 
