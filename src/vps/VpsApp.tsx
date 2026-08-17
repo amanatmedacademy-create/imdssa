@@ -3,7 +3,7 @@ import { RegistrationCenter } from '../features/registrations/RegistrationCenter
 import { TelegramNotificationSettings } from '../features/settings/TelegramNotificationSettings';
 import './vps.css';
 
-type User = { id: string; email: string; fullName: string; role: string };
+type User = { id: string; email: string; fullName: string; role: string; scope: 'platform' | 'tenant'; memberships?: Array<{ organizationId: string; role: string }> };
 type Overview = { organizations: number; products: number; modules: number; installations: number; platform_users: number; sync_pending: number };
 type Organization = { id: string; name: string; legal_name: string | null; bin: string | null; city: string | null; status: string; products?: number; modules?: number };
 type Product = { id: string; code: string; name: string; status: string; version: string | null; last_health: string; last_heartbeat_at: string | null; last_latency_ms?: number | null; last_error?: string | null; tenants: number };
@@ -84,16 +84,18 @@ export function VpsApp() {
   const [moduleOrganizationId, setModuleOrganizationId] = useState('');
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [passwordMessage, setPasswordMessage] = useState('');
+  const apiRoot = user?.scope === 'tenant' ? '/api/tenant/v1' : '/api/v1';
+  const visibleTabs = useMemo(() => user?.scope === 'tenant' ? tabs.filter((item) => !['registrations','settings'].includes(item.id)) : tabs, [user?.scope]);
 
   const refresh = useCallback(async () => {
     try {
       const [o, org, prod, mod, inst, entitlements, commandList] = await Promise.all([
-        api<Overview>('/api/v1/overview'), api<{ items: Organization[] }>('/api/v1/organizations'), api<{ items: Product[] }>('/api/v1/products'), api<{ items: Module[] }>('/api/v1/modules'), api<{ items: Installation[] }>('/api/v1/installations'), api<{ items: OrganizationProduct[] }>('/api/v1/organization-products'), api<{ items: ControlCommand[] }>('/api/v1/control-commands'),
+        api<Overview>(`${apiRoot}/overview`), api<{ items: Organization[] }>(`${apiRoot}/organizations`), api<{ items: Product[] }>(`${apiRoot}/products`), api<{ items: Module[] }>(`${apiRoot}/modules`), api<{ items: Installation[] }>(`${apiRoot}/installations`), api<{ items: OrganizationProduct[] }>(`${apiRoot}/organization-products`), api<{ items: ControlCommand[] }>(`${apiRoot}/control-commands`),
       ]);
       setOverview(o); setOrganizations(org.items); setProducts(prod.items); setModules(mod.items); setInstallations(inst.items); setOrganizationProducts(entitlements.items); setCommands(commandList.items); setError('');
       setModuleOrganizationId((current) => current || org.items[0]?.id || '');
     } catch (e) { setError(e instanceof Error ? e.message : 'Ошибка API'); }
-  }, []);
+  }, [apiRoot]);
 
   useEffect(() => { api<{ user: User }>('/api/auth/me').then((x) => setUser(x.user)).catch(() => setUser(null)).finally(() => setLoading(false)); }, []);
   useEffect(() => {
@@ -115,6 +117,7 @@ export function VpsApp() {
 
   if (loading) return <div className="vps-loading">Проверка доступа…</div>;
   if (!user) return <Login onReady={setUser} />;
+  const canManagePlatform = user.scope === 'platform' && ['platform_owner', 'platform_admin'].includes(user.role);
 
   const logout = async () => { await api('/api/auth/logout', { method: 'POST' }); setUser(null); };
   const createOrganization = async (event: FormEvent) => { event.preventDefault(); setBusy(true); try { await api('/api/v1/organizations', { method: 'POST', body: JSON.stringify(orgForm) }); setOrgForm({ name: '', legalName: '', bin: '', city: '' }); await refresh(); } catch (e) { setError(e instanceof Error ? e.message : 'Ошибка'); } finally { setBusy(false); } };
@@ -149,7 +152,7 @@ export function VpsApp() {
     finally { setBusy(false); }
   };
 
-  return <div className="vps-shell"><aside className="vps-sidebar"><div className="vps-brand"><b>IMDS</b><span>Super Admin</span></div><nav>{tabs.map((item) => <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav><div className="vps-user"><strong>{user.fullName}</strong><span>{user.email}</span><small>{user.role}</small><button onClick={() => void logout()}>Выйти</button></div></aside><main className="vps-content"><header className="vps-header"><div><span className="vps-eyebrow">ЦЕНТР УПРАВЛЕНИЯ IMDS</span><h1>{tabTitles[tab]}</h1></div><div className={`vps-live ${realtimeState}`}><i />{realtimeState === 'online' ? 'В РЕАЛЬНОМ ВРЕМЕНИ' : realtimeState === 'connecting' ? 'ПОДКЛЮЧЕНИЕ' : 'ОФЛАЙН'}</div></header>{error && <div className="vps-error">API: {error}</div>}
+  return <div className="vps-shell"><aside className="vps-sidebar"><div className="vps-brand"><b>IMDS</b><span>Super Admin</span></div><nav>{visibleTabs.map((item) => <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav><div className="vps-user"><strong>{user.fullName}</strong><span>{user.email}</span><small>{user.scope === 'tenant' ? `Организация · ${user.role}` : user.role}</small><button onClick={() => void logout()}>Выйти</button></div></aside><main className="vps-content"><header className="vps-header"><div><span className="vps-eyebrow">ЦЕНТР УПРАВЛЕНИЯ IMDS</span><h1>{tabTitles[tab]}</h1></div><div className={`vps-live ${realtimeState}`}><i />{realtimeState === 'online' ? 'В РЕАЛЬНОМ ВРЕМЕНИ' : realtimeState === 'connecting' ? 'ПОДКЛЮЧЕНИЕ' : 'ОФЛАЙН'}</div></header>{error && <div className="vps-error">API: {error}</div>}{!canManagePlatform && user.scope === 'tenant' && <div className="vps-note">Tenant scope: доступны только назначенные организации, продукты и модули. Изменения entitlement выполняет IMDS Control Center.</div>}
 
   {tab === 'overview' && <><section className="vps-metrics"><Metric label="Организации" value={overview?.organizations ?? 0} hint={`${activeOrganizations} активных`} /><Metric label="Продукты" value={overview?.products ?? 0} hint={`${healthyProducts} работают`} /><Metric label="Модули" value={overview?.modules ?? 0} hint="в каталоге" /><Metric label="Установки" value={overview?.installations ?? 0} hint="активных" /><Metric label="Синхронизация" value={overview?.sync_pending ?? 0} hint="ожидают подтверждения" /><Metric label="Пользователи платформы" value={overview?.platform_users ?? 0} hint="активных" /></section><section className="vps-card"><div className="vps-card-head"><div><span>МОНИТОРИНГ</span><h2>Состояние продуктов</h2></div></div>{products.length === 0 ? <EmptyState title="Продукты пока не подключены" text="После подключения продукта здесь появятся состояние, heartbeat и задержка." /> : <div className="vps-table-wrap"><table><thead><tr><th>Продукт</th><th>Организации</th><th>Задержка</th><th>Последний сигнал</th><th>Состояние</th></tr></thead><tbody>{products.map((p) => <tr key={p.id}><td><strong>{p.name}</strong><small>{p.code}</small></td><td>{p.tenants}</td><td>{p.last_latency_ms == null ? '—' : `${p.last_latency_ms} мс`}</td><td>{p.last_heartbeat_at ? new Date(p.last_heartbeat_at).toLocaleString('ru-RU') : 'Нет данных'}</td><td><Status value={p.last_health || 'unknown'} />{p.last_error && <small className="vps-inline-error">{p.last_error}</small>}</td></tr>)}</tbody></table></div>}</section></>}
 
