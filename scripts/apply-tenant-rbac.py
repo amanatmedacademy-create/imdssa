@@ -26,8 +26,8 @@ s = one(s, "    return json(res, 200, { user: { id: user.id, email: user.email, 
 s = one(s, "    setSessionCookie(res, session.token);\n    return json(res, 200, { user: { id: user.id, email: user.email, fullName: user.full_name, role: user.global_role } });\n  }\n\n  if (url.pathname === '/events' && method === 'GET') {", "    const access = await loadTenantAccess(pool, user);\n    setSessionCookie(res, session.token);\n    return json(res, 200, { user: { id: user.id, email: user.email, fullName: user.full_name, role: user.global_role || access.memberships[0]?.role || 'member', scope: access.isPlatformUser ? 'platform' : 'tenant', memberships: serializeMemberships(access) } });\n  }\n\n  if (url.pathname === '/events' && method === 'GET') {", 'password response')
 
 start_marker = "  if (url.pathname === '/events' && method === 'GET') {\n"
-end_marker = "  const user = await requireUser(req, res); if (!user) return;\n"
-replacement = """  if (url.pathname === '/events' && method === 'GET') {
+end_marker = "  if (url.pathname === '/api/v1/notifications' && method === 'GET') {\n"
+replacement = r"""  if (url.pathname === '/events' && method === 'GET') {
     const user = await requireUser(req, res); if (!user) return;
     const access = await loadTenantAccess(pool, user);
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
@@ -42,6 +42,8 @@ replacement = """  if (url.pathname === '/events' && method === 'GET') {
   const access = await loadTenantAccess(pool, user);
   if (await handleTenantApi({ req, res, pool, url, method, user, scope: access, json })) return;
   if (!access.isPlatformUser && url.pathname.startsWith('/api/v1/')) return json(res, 403, { error: 'TENANT_SCOPE_REQUIRED' });
+
+  if (url.pathname === '/api/v1/notifications' && method === 'GET') {
 """
 s = replace_between(s, start_marker, end_marker, replacement, 'events')
 s = s.replace("if (!['platform_owner','platform_admin','auditor'].includes(user.global_role))", "if (!user.global_role || !['platform_owner','platform_admin','auditor'].includes(user.global_role))")
