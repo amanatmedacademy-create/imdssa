@@ -89,16 +89,51 @@ jobs:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
           set -euo pipefail
+          export SSHPASS
           SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
-          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo bash -c '
-            set -euo pipefail
-            source /etc/imds-platform-control.env
-            test -n \"\$IMDS_PLATFORM_CONTROL_TOKEN\"
-            curl -fsS --max-time 10 -H \"Authorization: Bearer \$IMDS_PLATFORM_CONTROL_TOKEN\" http://127.0.0.1:8787/internal/platform/info | grep -q '\"product\":\"imds-marketing\"'
-            curl -fsS --max-time 10 -H \"Authorization: Bearer \$IMDS_PLATFORM_CONTROL_TOKEN\" http://127.0.0.1:8787/internal/platform/tenants | grep -q '\"items\"'
-            systemctl is-active --quiet imdssa-reconcile.timer
-            systemctl is-active --quiet imdssa-product-monitor.timer
-          '"
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          source /etc/imds-platform-control.env
+          test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
+
+          cleanup() {
+            rm -f /tmp/imds-platform-info.json /tmp/imds-platform-tenants.json
+          }
+          trap cleanup EXIT
+
+          curl -fsS --max-time 10 \
+            -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" \
+            http://127.0.0.1:8787/internal/platform/info \
+            -o /tmp/imds-platform-info.json
+          curl -fsS --max-time 10 \
+            -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" \
+            http://127.0.0.1:8787/internal/platform/tenants \
+            -o /tmp/imds-platform-tenants.json
+
+          python3 - <<'PY'
+          import json
+
+          with open('/tmp/imds-platform-info.json', encoding='utf-8') as stream:
+              info = json.load(stream)
+          with open('/tmp/imds-platform-tenants.json', encoding='utf-8') as stream:
+              tenants = json.load(stream)
+
+          if info.get('product') != 'imds-marketing':
+              raise SystemExit(f"Unexpected product response: {info!r}")
+          if not isinstance(tenants.get('items'), list):
+              raise SystemExit(f"Unexpected tenants response: {tenants!r}")
+
+          print(f"marketing_product={info['product']}")
+          print(f"marketing_tenants={len(tenants['items'])}")
+          PY
+
+          reconcile_state="$(systemctl is-active imdssa-reconcile.timer)"
+          monitor_state="$(systemctl is-active imdssa-product-monitor.timer)"
+          echo "reconcile_timer=$reconcile_state"
+          echo "monitor_timer=$monitor_state"
+          test "$reconcile_state" = active
+          test "$monitor_state" = active
+          REMOTE
       - name: Verify public endpoint
         run: |
           curl -fsS --max-time 20 "http://$VPS_HOST:8080/healthz"
