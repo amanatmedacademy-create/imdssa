@@ -37,8 +37,9 @@ jobs:
           test "$deployed" = "$EXPECTED_SHA"
           echo "release=$deployed"
 
-          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "EXPECTED_SHA='$EXPECTED_SHA' sudo -E bash -s" <<'REMOTE'
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
           set -euo pipefail
+          EXPECTED_SHA='b3905f97ad1e383a3e8f332fb7b0a106ea05db24'
           API=http://127.0.0.1:8788
 
           test "$(basename "$(readlink -f /var/www/imds-super-admin/current)")" = "$EXPECTED_SHA"
