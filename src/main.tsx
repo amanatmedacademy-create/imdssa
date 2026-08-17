@@ -16,6 +16,7 @@ import { OperationsProvider } from './features/operations/OperationsContext';
 import { ProductCatalogProvider } from './features/products/ProductCatalogContext';
 import { SecurityProvider } from './features/security/SecurityContext';
 import { SupportProvider } from './features/support/SupportContext';
+import { VpsApp } from './vps/VpsApp';
 import './styles.css';
 import './productRegistry.css';
 import './controlPlane.css';
@@ -33,7 +34,7 @@ import './moduleRuntime.css';
 import './frontendFixes.css';
 import './moduleUiFixes.css';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const legacyApp = (
   <React.StrictMode>
     <AppErrorBoundary>
       <BrowserRouter>
@@ -66,5 +67,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         </AuthProvider>
       </BrowserRouter>
     </AppErrorBoundary>
-  </React.StrictMode>,
+  </React.StrictMode>
+);
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  import.meta.env.VITE_RUNTIME === 'vps' ? <VpsApp /> : legacyApp,
 );
