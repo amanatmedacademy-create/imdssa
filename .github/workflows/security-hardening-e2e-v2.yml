@@ -2,6 +2,8 @@ name: Security Hardening E2E V2
 on:
   push:
     branches: ['agent/vps-security-hardening-v2']
+  pull_request:
+    branches: [main]
 permissions:
   contents: read
 jobs:
