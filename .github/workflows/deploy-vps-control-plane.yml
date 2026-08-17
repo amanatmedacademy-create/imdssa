@@ -1,7 +1,7 @@
 name: Deploy VPS Control Plane
 on:
   push:
-    branches: [main]
+    branches: [main, 'agent/tenant-rbac-isolation']
   workflow_dispatch:
 permissions:
   contents: read
@@ -45,6 +45,7 @@ jobs:
           cp deploy/vps/migrations/004_control_plane_sync.sql .deploy-stage/004_control_plane_sync.sql
           cp deploy/vps/migrations/005_registration_notifications.sql .deploy-stage/005_registration_notifications.sql
           cp deploy/vps/migrations/005_security_hardening.sql .deploy-stage/005_security_hardening.sql
+          cp deploy/vps/migrations/006_tenant_rbac.sql .deploy-stage/006_tenant_rbac.sql
           cp deploy/vps/nginx-super-admin.conf .deploy-stage/nginx.conf
           cp deploy/vps/deploy-control-plane.sh .deploy-stage/deploy-control-plane.sh
           cp deploy/vps/product-monitor.sh .deploy-stage/product-monitor.sh
@@ -84,6 +85,7 @@ jobs:
           for route in /api/auth/me /api/v1/overview /api/v1/control-commands /api/v1/notifications; do
             curl -fsS --max-time 15 -H "Cookie: imdssa_session=$TOKEN" "$API$route" >/dev/null
           done
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.organization_memberships') is not null" | grep -q '^t$'
           REMOTE
       - name: Verify local Marketing control channel
         shell: bash
@@ -97,44 +99,21 @@ jobs:
           set -euo pipefail
           source /etc/imds-platform-control.env
           test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
-
-          cleanup() {
-            rm -f /tmp/imds-platform-info.json /tmp/imds-platform-tenants.json
-          }
+          cleanup() { rm -f /tmp/imds-platform-info.json /tmp/imds-platform-tenants.json; }
           trap cleanup EXIT
-
-          curl -fsS --max-time 10 \
-            -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" \
-            http://127.0.0.1:8787/internal/platform/info \
-            -o /tmp/imds-platform-info.json
-          curl -fsS --max-time 10 \
-            -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" \
-            http://127.0.0.1:8787/internal/platform/tenants \
-            -o /tmp/imds-platform-tenants.json
-
+          curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info -o /tmp/imds-platform-info.json
+          curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/tenants -o /tmp/imds-platform-tenants.json
           python3 - <<'PY'
           import json
-
-          with open('/tmp/imds-platform-info.json', encoding='utf-8') as stream:
-              info = json.load(stream)
-          with open('/tmp/imds-platform-tenants.json', encoding='utf-8') as stream:
-              tenants = json.load(stream)
-
-          if info.get('product') != 'imds-marketing':
-              raise SystemExit(f"Unexpected product response: {info!r}")
-          if not isinstance(tenants.get('items'), list):
-              raise SystemExit(f"Unexpected tenants response: {tenants!r}")
-
+          with open('/tmp/imds-platform-info.json', encoding='utf-8') as stream: info = json.load(stream)
+          with open('/tmp/imds-platform-tenants.json', encoding='utf-8') as stream: tenants = json.load(stream)
+          if info.get('product') != 'imds-marketing': raise SystemExit(f"Unexpected product response: {info!r}")
+          if not isinstance(tenants.get('items'), list): raise SystemExit(f"Unexpected tenants response: {tenants!r}")
           print(f"marketing_product={info['product']}")
           print(f"marketing_tenants={len(tenants['items'])}")
           PY
-
-          reconcile_state="$(systemctl is-active imdssa-reconcile.timer)"
-          monitor_state="$(systemctl is-active imdssa-product-monitor.timer)"
-          echo "reconcile_timer=$reconcile_state"
-          echo "monitor_timer=$monitor_state"
-          test "$reconcile_state" = active
-          test "$monitor_state" = active
+          test "$(systemctl is-active imdssa-reconcile.timer)" = active
+          test "$(systemctl is-active imdssa-product-monitor.timer)" = active
           REMOTE
       - name: Verify public endpoint
         run: |
