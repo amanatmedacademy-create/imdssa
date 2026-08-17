@@ -24,6 +24,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: agent/registration-center-telegram-settings
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -48,5 +49,6 @@ jobs:
             echo 'No generated changes to commit'
           else
             git commit -m 'connect registration center and Telegram settings'
+            git pull --rebase origin agent/registration-center-telegram-settings
             git push origin HEAD:agent/registration-center-telegram-settings
           fi
