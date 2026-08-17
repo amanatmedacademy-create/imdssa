@@ -6,12 +6,18 @@ on:
     paths:
       - 'scripts/apply-registration-center.py'
       - '.github/workflows/apply-registration-center.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/apply-registration-center.py'
+      - '.github/workflows/apply-registration-center.yml'
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.head_ref == 'agent/registration-center-telegram-settings' || github.ref_name == 'agent/registration-center-telegram-settings'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
