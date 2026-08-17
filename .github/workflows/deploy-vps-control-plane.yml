@@ -59,6 +59,22 @@ jobs:
           sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'rm -rf /tmp/imdssa-release && mkdir -p /tmp/imdssa-release'
           sshpass -e scp "${SSH_ARGS[@]}" -r .deploy-stage/. "$VPS_USER@$VPS_HOST:/tmp/imdssa-release/"
           sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo install -m 0750 /tmp/imdssa-release/deploy-control-plane.sh /opt/imds-super-admin/deploy-control-plane.sh && sudo /opt/imds-super-admin/deploy-control-plane.sh '${GITHUB_SHA}' /tmp/imdssa-release"
+      - name: Verify local Marketing control channel
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" '
+            set -euo pipefail
+            source /etc/imds-platform-control.env
+            test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
+            curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info | grep -q '"product":"imds-marketing"'
+            curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/tenants | grep -q '"items"'
+            systemctl is-active --quiet imdssa-reconcile.timer
+            systemctl is-active --quiet imdssa-product-monitor.timer
+          '
       - name: Verify public endpoint
         run: |
           curl -fsS --max-time 20 "http://$VPS_HOST:8080/healthz"
