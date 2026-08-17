@@ -52,6 +52,16 @@ async function requireUser(req: IncomingMessage, res: ServerResponse): Promise<U
   return user;
 }
 
+function canManage(user: User): boolean {
+  return user.global_role === 'platform_owner' || user.global_role === 'platform_admin';
+}
+
+function requireManager(user: User, res: ServerResponse): boolean {
+  if (canManage(user)) return true;
+  json(res, 403, { error: 'PLATFORM_ADMIN_REQUIRED' });
+  return false;
+}
+
 function sse(res: ServerResponse, event: unknown) {
   res.write(`event: update\ndata: ${JSON.stringify(event)}\n\n`);
 }
@@ -115,7 +125,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       (select count(*)::int from app.products where status<>'disabled') products,
       (select count(*)::int from app.modules where status='published') modules,
       (select count(*)::int from app.module_installations where status='active') installations,
-      (select count(*)::int from app.platform_users where is_active=true) platform_users`);
+      (select count(*)::int from app.platform_users where is_active=true) platform_users,
+      (select count(*)::int from app.product_tenant_bindings where sync_status<>'synced') sync_pending`);
     return json(res, 200, result.rows[0]);
   }
 
@@ -127,6 +138,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     return json(res, 200, { items: result.rows });
   }
   if (url.pathname === '/api/v1/organizations' && method === 'POST') {
+    if (!requireManager(user, res)) return;
     const data = await body(req);
     const name = String(data.name || '').trim();
     if (!name) return json(res, 400, { error: 'ORGANIZATION_NAME_REQUIRED' });
@@ -139,6 +151,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
   const orgMatch = url.pathname.match(/^\/api\/v1\/organizations\/([0-9a-f-]+)$/i);
   if (orgMatch && method === 'PATCH') {
+    if (!requireManager(user, res)) return;
     const data = await body(req);
     const before = await pool.query('select * from app.organizations where id=$1', [orgMatch[1]]);
     if (!before.rowCount) return json(res, 404, { error: 'ORGANIZATION_NOT_FOUND' });
@@ -162,12 +175,17 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
   if (url.pathname === '/api/v1/organization-products' && method === 'GET') {
     const result = await pool.query(`select op.organization_id,op.product_id,op.status,op.config,op.created_at,op.updated_at,
-      o.name organization_name,p.code product_code,p.name product_name
-      from app.organization_products op join app.organizations o on o.id=op.organization_id join app.products p on p.id=op.product_id
+      o.name organization_name,p.code product_code,p.name product_name,
+      b.remote_tenant_id,b.desired_revision,b.actual_revision,b.sync_status,b.last_sync_at,b.last_error
+      from app.organization_products op
+      join app.organizations o on o.id=op.organization_id
+      join app.products p on p.id=op.product_id
+      left join app.product_tenant_bindings b on b.organization_id=op.organization_id and b.product_id=op.product_id
       order by o.name,p.name`);
     return json(res, 200, { items: result.rows });
   }
   if (url.pathname === '/api/v1/organization-products' && method === 'POST') {
+    if (!requireManager(user, res)) return;
     const data = await body(req);
     const organizationId = String(data.organizationId || '');
     const productId = String(data.productId || '');
@@ -175,7 +193,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const previous = await pool.query('select * from app.organization_products where organization_id=$1 and product_id=$2', [organizationId, productId]);
     const result = await pool.query(`insert into app.organization_products(organization_id,product_id,status,config)
       values($1,$2,coalesce(nullif($3,''),'active')::app.installation_status,$4::jsonb)
-      on conflict(organization_id,product_id) do update set status=excluded.status,config=excluded.config,updated_at=now() returning *`,
+      on conflict(organization_id,product_id) do update set status=excluded.status,config=app.organization_products.config || excluded.config,updated_at=now() returning *`,
       [organizationId, productId, String(data.status || 'active'), JSON.stringify(data.config || {})]);
     await audit(user.id, 'organization_product.upsert', 'organization_product', `${organizationId}:${productId}`, previous.rows[0] || null, result.rows[0]);
     return json(res, 200, result.rows[0]);
@@ -188,6 +206,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     return json(res, 200, { items: result.rows });
   }
   if (url.pathname === '/api/v1/installations' && method === 'POST') {
+    if (!requireManager(user, res)) return;
     const data = await body(req);
     const organizationId = String(data.organizationId || '');
     const moduleId = String(data.moduleId || '');
@@ -210,6 +229,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
   const installationMatch = url.pathname.match(/^\/api\/v1\/installations\/([0-9a-f-]+)$/i);
   if (installationMatch && method === 'PATCH') {
+    if (!requireManager(user, res)) return;
     const data = await body(req);
     const before = await pool.query('select * from app.module_installations where id=$1', [installationMatch[1]]);
     if (!before.rowCount) return json(res, 404, { error: 'INSTALLATION_NOT_FOUND' });
@@ -219,6 +239,14 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       where id=$1 returning *`, [installationMatch[1], String(data.status||''), data.config === undefined ? null : JSON.stringify(data.config)]);
     await audit(user.id, 'module_installation.update', 'module_installation', installationMatch[1], before.rows[0], result.rows[0]);
     return json(res, 200, result.rows[0]);
+  }
+
+  if (url.pathname === '/api/v1/control-commands' && method === 'GET') {
+    const result = await pool.query(`select c.id,c.command_type,c.desired_revision,c.status,c.attempts,c.last_error,c.created_at,c.updated_at,c.completed_at,
+      o.name organization_name,p.name product_name,p.code product_code
+      from app.control_commands c join app.organizations o on o.id=c.organization_id join app.products p on p.id=c.product_id
+      order by c.created_at desc limit 100`);
+    return json(res, 200, { items: result.rows });
   }
 
   if (url.pathname === '/api/v1/audit' && method === 'GET') {
