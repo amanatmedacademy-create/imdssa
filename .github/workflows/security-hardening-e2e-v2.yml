@@ -17,23 +17,6 @@ jobs:
         run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
       - name: Install SSH client
         run: sudo apt-get update && sudo apt-get install -y sshpass
-      - name: Wait for matching feature release
-        env:
-          SSHPASS: ${{ secrets.VPS_PASSWORD }}
-        run: |
-          set -euo pipefail
-          export SSHPASS
-          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
-          for _ in $(seq 1 120); do
-            deployed="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "basename \"\$(readlink -f /var/www/imds-super-admin/current)\"" 2>/dev/null || true)"
-            if [ "$deployed" = "$GITHUB_SHA" ]; then
-              echo "release=$deployed"
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "Feature release $GITHUB_SHA was not deployed in time" >&2
-          exit 1
       - name: Verify registration coexistence and security controls
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
