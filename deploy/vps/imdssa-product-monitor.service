@@ -1,0 +1,11 @@
+[Unit]
+Description=IMDS Super Admin product health monitor
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/imdssa-product-monitor
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

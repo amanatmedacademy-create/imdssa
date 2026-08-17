@@ -1,0 +1,140 @@
+name: Deploy VPS Control Plane
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-vps-control-plane
+  cancel-in-progress: true
+env:
+  VPS_HOST: ${{ secrets.VPS_HOST }}
+  VPS_USER: ${{ secrets.VPS_USER }}
+  VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint --workspace @imds/vps-api
+      - run: npm run build --workspace @imds/vps-api
+      - name: Build real-only frontend
+        env:
+          VITE_RUNTIME: vps
+          VITE_APP_ENV: production
+          VITE_APP_VERSION: 0.7.0
+          VITE_RELEASE_SHA: ${{ github.sha }}
+          IMDS_STRICT_ENV: 'true'
+        run: npm run build
+      - run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Stage release
+        run: |
+          mkdir -p .deploy-stage/web .deploy-stage/api/dist
+          cp -a dist/. .deploy-stage/web/
+          cp -a apps/vps-api/dist/. .deploy-stage/api/dist/
+          cp apps/vps-api/package.json .deploy-stage/api/package.json
+          cp deploy/vps/migrations/002_auth_sessions.sql .deploy-stage/002_auth_sessions.sql
+          cp deploy/vps/migrations/003_platform_management.sql .deploy-stage/003_platform_management.sql
+          cp deploy/vps/migrations/004_control_plane_sync.sql .deploy-stage/004_control_plane_sync.sql
+          cp deploy/vps/nginx-super-admin.conf .deploy-stage/nginx.conf
+          cp deploy/vps/deploy-control-plane.sh .deploy-stage/deploy-control-plane.sh
+          cp deploy/vps/product-monitor.sh .deploy-stage/product-monitor.sh
+          cp deploy/vps/imdssa-product-monitor.service .deploy-stage/product-monitor.service
+          cp deploy/vps/imdssa-product-monitor.timer .deploy-stage/product-monitor.timer
+          cp deploy/vps/imdssa-reconcile.service .deploy-stage/reconcile.service
+          cp deploy/vps/imdssa-reconcile.timer .deploy-stage/reconcile.timer
+      - name: Upload and deploy
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=20 -o ServerAliveCountMax=30)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'rm -rf /tmp/imdssa-release && mkdir -p /tmp/imdssa-release'
+          sshpass -e scp "${SSH_ARGS[@]}" -r .deploy-stage/. "$VPS_USER@$VPS_HOST:/tmp/imdssa-release/"
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo install -m 0750 /tmp/imdssa-release/deploy-control-plane.sh /opt/imds-super-admin/deploy-control-plane.sh && sudo /opt/imds-super-admin/deploy-control-plane.sh '${GITHUB_SHA}' /tmp/imdssa-release"
+      - name: Verify Super Admin authenticated runtime
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          API=http://127.0.0.1:8788
+          TOKEN="$(openssl rand -hex 32)"
+          TOKEN_HASH="$(printf '%s' "$TOKEN" | sha256sum | awk '{print $1}')"
+          ADMIN_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end, created_at limit 1")"
+          test -n "$ADMIN_ID"
+          sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 --command="insert into app.auth_sessions(user_id,token_hash,expires_at) values ('$ADMIN_ID'::uuid,'$TOKEN_HASH',now()+interval '10 minutes')" >/dev/null
+          cleanup() {
+            sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$TOKEN_HASH'" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for route in /api/auth/me /api/v1/overview /api/v1/control-commands; do
+            curl -fsS --max-time 15 -H "Cookie: imdssa_session=$TOKEN" "$API$route" >/dev/null
+          done
+          REMOTE
+      - name: Verify local Marketing control channel
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          source /etc/imds-platform-control.env
+          test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
+
+          cleanup() {
+            rm -f /tmp/imds-platform-info.json /tmp/imds-platform-tenants.json
+          }
+          trap cleanup EXIT
+
+          curl -fsS --max-time 10 \
+            -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" \
+            http://127.0.0.1:8787/internal/platform/info \
+            -o /tmp/imds-platform-info.json
+          curl -fsS --max-time 10 \
+            -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" \
+            http://127.0.0.1:8787/internal/platform/tenants \
+            -o /tmp/imds-platform-tenants.json
+
+          python3 - <<'PY'
+          import json
+
+          with open('/tmp/imds-platform-info.json', encoding='utf-8') as stream:
+              info = json.load(stream)
+          with open('/tmp/imds-platform-tenants.json', encoding='utf-8') as stream:
+              tenants = json.load(stream)
+
+          if info.get('product') != 'imds-marketing':
+              raise SystemExit(f"Unexpected product response: {info!r}")
+          if not isinstance(tenants.get('items'), list):
+              raise SystemExit(f"Unexpected tenants response: {tenants!r}")
+
+          print(f"marketing_product={info['product']}")
+          print(f"marketing_tenants={len(tenants['items'])}")
+          PY
+
+          reconcile_state="$(systemctl is-active imdssa-reconcile.timer)"
+          monitor_state="$(systemctl is-active imdssa-product-monitor.timer)"
+          echo "reconcile_timer=$reconcile_state"
+          echo "monitor_timer=$monitor_state"
+          test "$reconcile_state" = active
+          test "$monitor_state" = active
+          REMOTE
+      - name: Verify public endpoint
+        run: |
+          curl -fsS --max-time 20 "http://$VPS_HOST:8080/healthz"
+          curl -fsS --max-time 20 "http://$VPS_HOST:8080/" | grep -qi '<div id="root"'

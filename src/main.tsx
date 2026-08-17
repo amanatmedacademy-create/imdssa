@@ -1,70 +1,17 @@
-import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
-import { App } from './App';
-import { AppErrorBoundary } from './core/AppErrorBoundary';
-import { AuthGate } from './core/AuthGate';
-import { AuthProvider } from './core/auth';
-import { ProductAnalyticsProvider } from './features/analytics/ProductAnalyticsContext';
-import { BillingProvider } from './features/billing/BillingContext';
-import { BillingOperationsProvider } from './features/billingOperations/BillingOperationsContext';
-import { GovernanceProvider } from './features/governance/GovernanceContext';
-import { IdentityProvider } from './features/identity/IdentityContext';
-import { ModuleRuntimeProvider } from './features/modules/ModuleRuntimeContext';
-import { ObservabilityProvider } from './features/observability/ObservabilityContext';
-import { OperationsProvider } from './features/operations/OperationsContext';
-import { ProductCatalogProvider } from './features/products/ProductCatalogContext';
-import { SecurityProvider } from './features/security/SecurityContext';
-import { SupportProvider } from './features/support/SupportContext';
-import './styles.css';
-import './productRegistry.css';
-import './controlPlane.css';
-import './productCatalog.css';
-import './billing.css';
-import './billingOperations.css';
-import './identity.css';
-import './operations.css';
-import './security.css';
-import './observability.css';
-import './productAnalytics.css';
-import './support.css';
-import './governance.css';
-import './moduleRuntime.css';
-import './frontendFixes.css';
-import './moduleUiFixes.css';
+import { VpsApp } from './vps/VpsApp';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <AppErrorBoundary>
-      <BrowserRouter>
-        <AuthProvider>
-          <AuthGate>
-            <ProductCatalogProvider>
-              <BillingProvider>
-                <BillingOperationsProvider>
-                  <IdentityProvider>
-                    <OperationsProvider>
-                      <SecurityProvider>
-                        <ObservabilityProvider>
-                          <ProductAnalyticsProvider>
-                            <SupportProvider>
-                              <GovernanceProvider>
-                                <ModuleRuntimeProvider>
-                                  <App />
-                                </ModuleRuntimeProvider>
-                              </GovernanceProvider>
-                            </SupportProvider>
-                          </ProductAnalyticsProvider>
-                        </ObservabilityProvider>
-                      </SecurityProvider>
-                    </OperationsProvider>
-                  </IdentityProvider>
-                </BillingOperationsProvider>
-              </BillingProvider>
-            </ProductCatalogProvider>
-          </AuthGate>
-        </AuthProvider>
-      </BrowserRouter>
-    </AppErrorBoundary>
-  </React.StrictMode>,
-);
+const rootElement = document.getElementById('root');
+if (!rootElement) throw new Error('Root element is missing');
+const root = ReactDOM.createRoot(rootElement);
+
+if (import.meta.env.VITE_RUNTIME === 'vps') {
+  root.render(<VpsApp />);
+} else {
+  void import('./LegacyApp').then(({ LegacyApp }) => {
+    root.render(<LegacyApp />);
+  }).catch((error: unknown) => {
+    console.error('Failed to load legacy runtime', error);
+    rootElement.textContent = 'IMDS Super Admin failed to initialize.';
+  });
+}

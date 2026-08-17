@@ -1,0 +1,59 @@
+name: Setup VPS Product Monitor
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - deploy/vps/product-monitor.sh
+      - deploy/vps/imdssa-product-monitor.service
+      - deploy/vps/imdssa-product-monitor.timer
+      - .github/workflows/setup-vps-product-monitor.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  VPS_HOST: ${{ secrets.VPS_HOST }}
+  VPS_USER: ${{ secrets.VPS_USER }}
+  VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate VPS secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          test -n "$VPS_PASSWORD"
+
+      - uses: actions/checkout@v4
+
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Install product monitor on VPS
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=20 -o ServerAliveCountMax=30)
+          sshpass -e scp "${SSH_ARGS[@]}" deploy/vps/product-monitor.sh "$VPS_USER@$VPS_HOST:/tmp/imdssa-product-monitor"
+          sshpass -e scp "${SSH_ARGS[@]}" deploy/vps/imdssa-product-monitor.service "$VPS_USER@$VPS_HOST:/tmp/imdssa-product-monitor.service"
+          sshpass -e scp "${SSH_ARGS[@]}" deploy/vps/imdssa-product-monitor.timer "$VPS_USER@$VPS_HOST:/tmp/imdssa-product-monitor.timer"
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" '
+            set -euo pipefail
+            sudo install -m 0750 /tmp/imdssa-product-monitor /usr/local/sbin/imdssa-product-monitor
+            sudo install -m 0644 /tmp/imdssa-product-monitor.service /etc/systemd/system/imdssa-product-monitor.service
+            sudo install -m 0644 /tmp/imdssa-product-monitor.timer /etc/systemd/system/imdssa-product-monitor.timer
+            sudo systemctl daemon-reload
+            sudo systemctl enable --now imdssa-product-monitor.timer
+            sudo systemctl start imdssa-product-monitor.service
+            sudo systemctl is-active imdssa-product-monitor.timer
+            sudo -u postgres psql -d imdssa -AtF "|" -c "select code,last_health,last_latency_ms from app.products order by code" | grep "^imds-marketing|"
+          '
