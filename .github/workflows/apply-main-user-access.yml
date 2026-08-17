@@ -1,0 +1,177 @@
+name: Integrate Users Access on Main
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/apply-main-user-access.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: integrate-users-access-main
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Integrate backend, auth enforcement, deploy and UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('apps/vps-api/src/index.ts')
+          s = p.read_text()
+          anchor = "import { loadTenantAccess, organizationIds, serializeMemberships } from './tenantAccess.js';\n"
+          insert = anchor + "import { handleUserAccessApi } from './userAccessRoutes.js';\n"
+          if "handleUserAccessApi" not in s:
+              if anchor not in s: raise SystemExit('index import anchor missing')
+              s = s.replace(anchor, insert, 1)
+
+          old = "type User = { id: string; email: string; full_name: string; global_role: string | null; is_active: boolean };"
+          new = "type User = { id: string; email: string; full_name: string; global_role: string | null; is_active: boolean; must_change_password: boolean };"
+          if new not in s:
+              if old not in s: raise SystemExit('User type anchor missing')
+              s = s.replace(old, new, 1)
+
+          old = "select u.id,u.email,u.full_name,u.global_role,u.is_active\n"
+          new = "select u.id,u.email,u.full_name,u.global_role,u.is_active,u.must_change_password\n"
+          if new not in s:
+              if old not in s: raise SystemExit('currentUser query anchor missing')
+              s = s.replace(old, new, 1)
+
+          old = "select id,email,full_name,global_role,is_active,password_hash,failed_login_attempts,locked_until from app.platform_users"
+          new = "select id,email,full_name,global_role,is_active,must_change_password,password_hash,failed_login_attempts,locked_until from app.platform_users"
+          if new not in s:
+              if old not in s: raise SystemExit('login query anchor missing')
+              s = s.replace(old, new, 1)
+
+          s = s.replace("memberships: serializeMemberships(access) } });", "memberships: serializeMemberships(access), mustChangePassword: user.must_change_password } });", 2)
+          s = s.replace("memberships: serializeMemberships(access) } });", "memberships: serializeMemberships(access), mustChangePassword: row.must_change_password } });", 1)
+
+          old = "update app.platform_users set password_hash=$2,password_changed_at=now(),failed_login_attempts=0,locked_until=null where id=$1"
+          new = "update app.platform_users set password_hash=$2,password_changed_at=now(),failed_login_attempts=0,locked_until=null,must_change_password=false where id=$1"
+          if new not in s:
+              if old not in s: raise SystemExit('password update anchor missing')
+              s = s.replace(old, new, 1)
+
+          events_anchor = "  if (url.pathname === '/events' && method === 'GET') {\n    const user = await requireUser(req, res); if (!user) return;\n"
+          events_new = "  if (url.pathname === '/events' && method === 'GET') {\n    const user = await requireUser(req, res); if (!user) return;\n    if (user.must_change_password) return json(res, 403, { error: 'PASSWORD_CHANGE_REQUIRED' });\n"
+          if events_new not in s:
+              if events_anchor not in s: raise SystemExit('events anchor missing')
+              s = s.replace(events_anchor, events_new, 1)
+
+          access_anchor = "  const user = await requireUser(req, res); if (!user) return;\n  const access = await loadTenantAccess(pool, user);\n  if (await handleTenantApi({ req, res, pool, url, method, user, scope: access, json })) return;\n"
+          access_new = "  const user = await requireUser(req, res); if (!user) return;\n  if (user.must_change_password) return json(res, 403, { error: 'PASSWORD_CHANGE_REQUIRED' });\n  const access = await loadTenantAccess(pool, user);\n  if (await handleUserAccessApi({ req, res, pool, url, method, user, scope: access, json, audit })) return;\n  if (await handleTenantApi({ req, res, pool, url, method, user, scope: access, json })) return;\n"
+          if "handleUserAccessApi({ req, res" not in s:
+              if access_anchor not in s: raise SystemExit('access routing anchor missing')
+              s = s.replace(access_anchor, access_new, 1)
+          p.write_text(s)
+
+          p = Path('deploy/vps/deploy-control-plane.sh')
+          s = p.read_text()
+          old = '006_tenant_rbac.sql 007_notification_delivery_settings.sql; do'
+          new = '006_tenant_rbac.sql 007_notification_delivery_settings.sql 008_tenant_user_access.sql; do'
+          if new not in s:
+              if old not in s: raise SystemExit('deploy migration anchor missing')
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          p = Path('.github/workflows/deploy-vps-control-plane.yml')
+          s = p.read_text()
+          stage7 = '          cp deploy/vps/migrations/007_notification_delivery_settings.sql .deploy-stage/007_notification_delivery_settings.sql\n'
+          stage8 = '          cp deploy/vps/migrations/008_tenant_user_access.sql .deploy-stage/008_tenant_user_access.sql\n'
+          if stage8 not in s:
+              if stage7 not in s: raise SystemExit('stage migration anchor missing')
+              s = s.replace(stage7, stage7 + stage8, 1)
+          check = "          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command=\"select exists(select 1 from information_schema.columns where table_schema='app' and table_name='platform_users' and column_name='must_change_password')\" | grep -q '^t$'\n"
+          marker = "          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command=\"select to_regclass('app.organization_memberships') is not null\" | grep -q '^t$'\n"
+          if check not in s:
+              if marker not in s: raise SystemExit('runtime verify anchor missing')
+              s = s.replace(marker, marker + check, 1)
+          p.write_text(s)
+
+          p = Path('src/vps/VpsApp.tsx')
+          s = p.read_text()
+          import_anchor = "import { TelegramNotificationSettings } from '../features/settings/TelegramNotificationSettings';\n"
+          import_new = import_anchor + "import { UserAccessManagement } from '../features/access/UserAccessManagement';\n"
+          if 'UserAccessManagement' not in s:
+              if import_anchor not in s: raise SystemExit('UI import anchor missing')
+              s = s.replace(import_anchor, import_new, 1)
+
+          old = "type User = { id: string; email: string; fullName: string; role: string; scope: 'platform' | 'tenant'; memberships?: Array<{ organizationId: string; role: string }> };"
+          new = "type User = { id: string; email: string; fullName: string; role: string; scope: 'platform' | 'tenant'; memberships?: Array<{ organizationId: string; role: string }>; mustChangePassword?: boolean };"
+          if new not in s:
+              if old not in s: raise SystemExit('UI user type anchor missing')
+              s = s.replace(old, new, 1)
+
+          old = "type Tab = 'overview' | 'organizations' | 'registrations' | 'products' | 'modules' | 'installations' | 'sync' | 'realtime' | 'security' | 'settings';"
+          new = "type Tab = 'overview' | 'organizations' | 'users' | 'registrations' | 'products' | 'modules' | 'installations' | 'sync' | 'realtime' | 'security' | 'settings';"
+          if new not in s:
+              if old not in s: raise SystemExit('Tab type anchor missing')
+              s = s.replace(old, new, 1)
+
+          tab_anchor = "  { id: 'organizations', label: 'Организации' },\n"
+          tab_new = tab_anchor + "  { id: 'users', label: 'Пользователи' },\n"
+          if "id: 'users'" not in s:
+              if tab_anchor not in s: raise SystemExit('tab anchor missing')
+              s = s.replace(tab_anchor, tab_new, 1)
+
+          title_anchor = "overview: 'Обзор платформы', organizations: 'Организации', registrations: 'Новые регистрации',"
+          title_new = "overview: 'Обзор платформы', organizations: 'Организации', users: 'Пользователи и доступ', registrations: 'Новые регистрации',"
+          if "users: 'Пользователи и доступ'" not in s:
+              if title_anchor not in s: raise SystemExit('title anchor missing')
+              s = s.replace(title_anchor, title_new, 1)
+
+          old = "const visibleTabs = useMemo(() => user?.scope === 'tenant' ? tabs.filter((item) => !['registrations','settings'].includes(item.id)) : tabs, [user?.scope]);"
+          new = "const visibleTabs = useMemo(() => user?.scope === 'tenant' ? tabs.filter((item) => !['registrations','settings'].includes(item.id) && (item.id !== 'users' || ['owner','admin'].includes(user.role))) : tabs, [user?.scope, user?.role]);"
+          if new not in s:
+              if old not in s: raise SystemExit('visible tabs anchor missing')
+              s = s.replace(old, new, 1)
+
+          render_anchor = "{tab === 'registrations' && user.scope === 'platform' && <RegistrationCenter />}"
+          render_new = "{tab === 'users' && <UserAccessManagement user={user} organizations={organizations} products={products} modules={modules} />}\n        " + render_anchor
+          if "tab === 'users' && <UserAccessManagement" not in s:
+              if render_anchor not in s: raise SystemExit('users render anchor missing')
+              s = s.replace(render_anchor, render_new, 1)
+
+          password_gate_anchor = "  if (!user) return <Login onReady={setUser} />;\n  const canManagePlatform"
+          password_gate_new = "  if (!user) return <Login onReady={setUser} />;\n  if (user.mustChangePassword && tab !== 'security') setTab('security');\n  const canManagePlatform"
+          if "user.mustChangePassword && tab !== 'security'" not in s:
+              if password_gate_anchor not in s: raise SystemExit('password UI gate anchor missing')
+              s = s.replace(password_gate_anchor, password_gate_new, 1)
+          p.write_text(s)
+          PY
+          git diff --check
+      - name: Validate production tree
+        env:
+          VITE_RUNTIME: vps
+          VITE_APP_ENV: production
+          VITE_APP_VERSION: 0.7.0
+          VITE_RELEASE_SHA: ${{ github.sha }}
+          IMDS_STRICT_ENV: 'true'
+        run: |
+          npm install --no-audit --no-fund
+          npm run lint --workspace @imds/vps-api
+          npm run build --workspace @imds/vps-api
+          npm run lint
+          npm run build
+      - name: Commit directly to main
+        run: |
+          git config user.name 'IMDS Automation'
+          git config user.email 'automation@imds.local'
+          git rm .github/workflows/apply-main-user-access.yml
+          git add apps/vps-api/src/index.ts apps/vps-api/src/userAccessRoutes.ts deploy/vps/deploy-control-plane.sh deploy/vps/migrations/008_tenant_user_access.sql .github/workflows/deploy-vps-control-plane.yml src/vps/VpsApp.tsx src/features/access/UserAccessManagement.tsx
+          git diff --cached --check
+          git commit -m 'Add organization user access management'
+          git push origin HEAD:main
