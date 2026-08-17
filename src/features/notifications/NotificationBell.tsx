@@ -23,6 +23,7 @@ function formatDate(value: string) {
 
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
+  const [visible, setVisible] = useState(false);
   const [items, setItems] = useState<RegistrationNotification[]>([]);
   const [unread, setUnread] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -31,28 +32,40 @@ export function NotificationBell() {
   const load = useCallback(async () => {
     try {
       const response = await fetch('/api/v1/notifications?limit=20', { credentials: 'include', cache: 'no-store' });
+      if (response.status === 401) {
+        setVisible(false);
+        setOpen(false);
+        return false;
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload = await response.json() as NotificationResponse;
       setItems(Array.isArray(payload.items) ? payload.items : []);
       setUnread(Number(payload.unread || 0));
+      setVisible(true);
       setError(null);
+      return true;
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
+      return false;
     }
   }, []);
 
   useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(), 15000);
-    const events = new EventSource('/events', { withCredentials: true });
-    events.addEventListener('update', () => void load());
-    const onFocus = () => void load();
+    let events: EventSource | null = null;
+    const connectEvents = async () => {
+      if (events || !(await load())) return;
+      events = new EventSource('/events', { withCredentials: true });
+      events.addEventListener('update', () => void load());
+    };
+    void connectEvents();
+    const timer = window.setInterval(() => void connectEvents(), 15000);
+    const onFocus = () => void connectEvents();
     const onOutside = (event: MouseEvent) => { if (root.current && !root.current.contains(event.target as Node)) setOpen(false); };
     window.addEventListener('focus', onFocus);
     document.addEventListener('mousedown', onOutside);
     return () => {
       window.clearInterval(timer);
-      events.close();
+      events?.close();
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('mousedown', onOutside);
     };
@@ -64,8 +77,10 @@ export function NotificationBell() {
     if (response.ok) await load();
   }
 
+  if (!visible) return null;
+
   return <div className="notification-bell" ref={root}>
-    <button className="icon-button notification-trigger" aria-label="Уведомления" onClick={() => { setOpen((value) => !value); void load(); }}>
+    <button className="notification-trigger" aria-label="Уведомления" onClick={() => { setOpen((value) => !value); void load(); }}>
       <Bell size={18}/>{unread > 0 && <span className="notification-count">{unread > 99 ? '99+' : unread}</span>}
     </button>
     {open && <div className="notification-popover">
