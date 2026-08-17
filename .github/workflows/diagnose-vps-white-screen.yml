@@ -1,0 +1,50 @@
+name: Diagnose VPS White Screen
+
+on:
+  push:
+    branches:
+      - agent/vps-control-plane
+    paths:
+      - .github/workflows/diagnose-vps-white-screen.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect public HTML and assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='http://89.207.250.55:8080'
+          curl -fsS "$URL/" -o /tmp/index.html
+          echo '--- INDEX ---'
+          cat /tmp/index.html
+          echo
+          echo '--- ASSETS ---'
+          grep -oE '(src|href)="[^"]+"' /tmp/index.html | sed -E 's/^(src|href)="//;s/"$//' | while read -r path; do
+            case "$path" in
+              /assets/*)
+                echo "### $path"
+                curl -fsSI "$URL$path" | sed -n '1,12p'
+                ;;
+            esac
+          done
+
+      - name: Run headless Chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='http://89.207.250.55:8080/'
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          test -n "$CHROME"
+          "$CHROME" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=6000 --dump-dom "$URL" > /tmp/dom.html 2>/tmp/chrome.err || true
+          echo '--- DOM ROOT ---'
+          grep -oE '<div id="root"[^>]*>.*</div>' /tmp/dom.html | head -c 5000 || true
+          echo
+          echo '--- DOM HEAD ---'
+          sed -n '1,80p' /tmp/dom.html
+          echo '--- CHROME ERRORS ---'
+          grep -Ei 'error|failed|exception|refused|uncaught|module|mime|net::' /tmp/chrome.err | tail -n 120 || true
