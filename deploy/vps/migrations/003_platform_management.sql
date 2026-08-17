@@ -16,7 +16,7 @@ INSERT INTO app.products(
 VALUES (
   'imds-marketing',
   'IMDS Marketing',
-  'Marketing automation, CRM context, communications and integrations',
+  'Маркетинг, CRM-контекст, коммуникации, аналитика и интеграции',
   'active'::app.product_status,
   'http://127.0.0.1:8787',
   'http://127.0.0.1:8787/api/health',
@@ -35,13 +35,13 @@ WITH marketing AS (
 ), catalog(code,name,description,category) AS (
   VALUES
     ('marketing.crm','CRM','Лиды, сделки, контакты и CRM-контекст','sales'),
-    ('marketing.call-center','Call Center','Коммуникации call center и рабочее место оператора','communications'),
-    ('marketing.tasks','Tasks','Задачи, назначения, повторения и уведомления','operations'),
-    ('marketing.whatsapp-business','WhatsApp Business','WABA messaging, embedded signup и WhatsApp flows','communications'),
-    ('marketing.meta-ads','Meta Ads','Управление рекламой Meta, каталоги, ad sets и conversions','advertising'),
-    ('marketing.analytics','Analytics','Маркетинговая аналитика и показатели','analytics'),
-    ('marketing.automation','Automation','Автоматизации и journey engine','automation'),
-    ('marketing.voice-transcription','Voice Transcription','Транскрибация голосовых сообщений и звонков','telephony')
+    ('marketing.call-center','Колл-центр','Колл-центр и рабочее место оператора','communications'),
+    ('marketing.tasks','Задачи','Задачи, назначения, повторения и уведомления','operations'),
+    ('marketing.whatsapp-business','WhatsApp Business','Сообщения WhatsApp Business, Embedded Signup и WhatsApp Flows','communications'),
+    ('marketing.meta-ads','Реклама Meta','Управление рекламой Meta, каталогами, группами объявлений и конверсиями','advertising'),
+    ('marketing.analytics','Аналитика','Маркетинговая аналитика и показатели','analytics'),
+    ('marketing.automation','Автоматизации','Автоматизации и сценарии взаимодействия с клиентами','automation'),
+    ('marketing.voice-transcription','Транскрибация звонков','Транскрибация голосовых сообщений и звонков','telephony')
 )
 INSERT INTO app.modules(
   code,
