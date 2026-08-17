@@ -29,7 +29,7 @@ jobs:
         env:
           VITE_RUNTIME: vps
           VITE_APP_ENV: production
-          VITE_APP_VERSION: 0.6.0
+          VITE_APP_VERSION: 0.7.0
           VITE_RELEASE_SHA: ${{ github.sha }}
           IMDS_STRICT_ENV: 'true'
         run: npm run build
@@ -42,11 +42,14 @@ jobs:
           cp apps/vps-api/package.json .deploy-stage/api/package.json
           cp deploy/vps/migrations/002_auth_sessions.sql .deploy-stage/002_auth_sessions.sql
           cp deploy/vps/migrations/003_platform_management.sql .deploy-stage/003_platform_management.sql
+          cp deploy/vps/migrations/004_control_plane_sync.sql .deploy-stage/004_control_plane_sync.sql
           cp deploy/vps/nginx-super-admin.conf .deploy-stage/nginx.conf
           cp deploy/vps/deploy-control-plane.sh .deploy-stage/deploy-control-plane.sh
           cp deploy/vps/product-monitor.sh .deploy-stage/product-monitor.sh
           cp deploy/vps/imdssa-product-monitor.service .deploy-stage/product-monitor.service
           cp deploy/vps/imdssa-product-monitor.timer .deploy-stage/product-monitor.timer
+          cp deploy/vps/imdssa-reconcile.service .deploy-stage/reconcile.service
+          cp deploy/vps/imdssa-reconcile.timer .deploy-stage/reconcile.timer
       - name: Upload and deploy
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}

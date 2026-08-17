@@ -1,0 +1,12 @@
+[Unit]
+Description=Reconcile IMDS desired and actual state every 5 seconds
+
+[Timer]
+OnBootSec=5s
+OnUnitActiveSec=5s
+AccuracySec=1s
+Persistent=true
+Unit=imdssa-reconcile.service
+
+[Install]
+WantedBy=timers.target

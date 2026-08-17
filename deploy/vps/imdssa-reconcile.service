@@ -1,0 +1,19 @@
+[Unit]
+Description=IMDS Super Admin entitlement reconciler
+After=network-online.target postgresql.service imds-marketing.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=imdssa
+Group=imdssa
+WorkingDirectory=/opt/imds-super-admin/api
+EnvironmentFile=/etc/imds-super-admin/postgres.env
+EnvironmentFile=-/etc/imds-platform-control.env
+ExecStart=/usr/bin/node /opt/imds-super-admin/api/dist/reconcile.js
+Nice=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/imds-super-admin

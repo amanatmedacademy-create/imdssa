@@ -7,6 +7,8 @@ APP_DIR=/opt/imds-super-admin
 WEB_ROOT=/var/www/imds-super-admin
 API_DIR="$APP_DIR/api"
 ENV_DIR=/etc/imds-super-admin
+CONTROL_ENV=/etc/imds-platform-control.env
+CONTROL_GROUP=imds-platform
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "deploy-control-plane.sh must run as root" >&2
@@ -14,6 +16,18 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 id -u imdssa >/dev/null 2>&1 || useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin imdssa
+getent group "$CONTROL_GROUP" >/dev/null 2>&1 || groupadd --system "$CONTROL_GROUP"
+usermod -a -G "$CONTROL_GROUP" imdssa
+if id imds >/dev/null 2>&1; then
+  usermod -a -G "$CONTROL_GROUP" imds
+fi
+if [ ! -f "$CONTROL_ENV" ]; then
+  umask 027
+  printf 'IMDS_PLATFORM_CONTROL_TOKEN=%s\n' "$(openssl rand -hex 48)" > "$CONTROL_ENV"
+fi
+chown root:"$CONTROL_GROUP" "$CONTROL_ENV"
+chmod 0640 "$CONTROL_ENV"
+
 install -d -o root -g root -m 0755 "$APP_DIR"
 install -d -o imdssa -g imdssa -m 0750 "$API_DIR"
 install -d -m 0755 "$WEB_ROOT/releases/$RELEASE_SHA"
@@ -27,7 +41,7 @@ chown root:imdssa "$ENV_DIR/postgres.env"
 chmod 0640 "$ENV_DIR/postgres.env"
 
 install -d -o root -g postgres -m 0750 "$APP_DIR/migrations"
-for migration in 002_auth_sessions.sql 003_platform_management.sql; do
+for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql; do
   install -o root -g postgres -m 0640 "$STAGE_DIR/$migration" "$APP_DIR/migrations/$migration"
   sudo -u postgres psql --set=ON_ERROR_STOP=1 --dbname=imdssa --file="$APP_DIR/migrations/$migration"
 done
@@ -101,12 +115,16 @@ ln -sfn /etc/nginx/sites-available/imds-super-admin /etc/nginx/sites-enabled/imd
 install -m 0755 "$STAGE_DIR/product-monitor.sh" /usr/local/sbin/imdssa-product-monitor
 install -m 0644 "$STAGE_DIR/product-monitor.service" /etc/systemd/system/imdssa-product-monitor.service
 install -m 0644 "$STAGE_DIR/product-monitor.timer" /etc/systemd/system/imdssa-product-monitor.timer
+install -m 0644 "$STAGE_DIR/reconcile.service" /etc/systemd/system/imdssa-reconcile.service
+install -m 0644 "$STAGE_DIR/reconcile.timer" /etc/systemd/system/imdssa-reconcile.timer
 
 nginx -t
 systemctl daemon-reload
 systemctl enable --now imds-super-admin-api.service
 systemctl enable --now imdssa-product-monitor.timer
+systemctl enable --now imdssa-reconcile.timer
 systemctl start imdssa-product-monitor.service || true
+systemctl start imdssa-reconcile.service || true
 systemctl reload nginx
 
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
@@ -118,7 +136,7 @@ curl --fail --silent --show-error http://127.0.0.1:8080/healthz >/dev/null
 systemctl is-active --quiet imds-super-admin-api.service
 systemctl is-active --quiet postgresql
 systemctl is-active --quiet imdssa-product-monitor.timer
-
+systemctl is-active --quiet imdssa-reconcile.timer
 sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select code||'|'||last_health::text from app.products where code='imds-marketing'" | grep -q '^imds-marketing|'
 
 echo "IMDS Super Admin deployed on port 8080"
