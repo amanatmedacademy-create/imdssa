@@ -1,5 +1,6 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import pg from 'pg';
+import { handleInternalRegistrationEvent } from './registrationNotifications.js';
 import { createSessionToken, hashToken, verifyPassword } from './security.js';
 
 const { Pool, Client } = pg;
@@ -80,6 +81,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     return json(res, 200, { status: 'healthy', service: 'imdssa-api', database: db.rows[0].database, time: db.rows[0].time });
   }
 
+  if (await handleInternalRegistrationEvent(req, res, pool, url, method)) return;
+
   if (url.pathname === '/api/auth/login' && method === 'POST') {
     const data = await body(req);
     const email = String(data.email || '').trim().toLowerCase();
@@ -119,6 +122,22 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
   const user = await requireUser(req, res); if (!user) return;
 
+  if (url.pathname === '/api/v1/notifications' && method === 'GET') {
+    const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 20), 1), 100);
+    const result = await pool.query(`select id,event_id,source_product_code,external_tenant_id,organization_id,company_name,owner_name,owner_email,owner_phone,
+      trial_status,trial_started_at,trial_ends_at,telegram_status,telegram_error,read_at,created_at
+      from app.registration_notifications order by created_at desc limit $1`, [limit]);
+    const unread = await pool.query('select count(*)::int as count from app.registration_notifications where read_at is null');
+    return json(res, 200, { items: result.rows, unread: unread.rows[0]?.count || 0 });
+  }
+
+  const notificationReadMatch = url.pathname.match(/^\/api\/v1\/notifications\/([0-9a-f-]+)\/read$/i);
+  if (notificationReadMatch && method === 'PATCH') {
+    const result = await pool.query('update app.registration_notifications set read_at=coalesce(read_at,now()),updated_at=now() where id=$1 returning id,read_at', [notificationReadMatch[1]]);
+    if (!result.rowCount) return json(res, 404, { error: 'NOTIFICATION_NOT_FOUND' });
+    return json(res, 200, result.rows[0]);
+  }
+
   if (url.pathname === '/api/v1/overview' && method === 'GET') {
     const result = await pool.query(`select
       (select count(*)::int from app.organizations where status='active') organizations,
@@ -131,7 +150,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
 
   if (url.pathname === '/api/v1/organizations' && method === 'GET') {
-    const result = await pool.query(`select o.id,o.external_key,o.name,o.legal_name,o.bin,o.city,o.status,o.created_at,o.updated_at,
+    const result = await pool.query(`select o.id,o.external_key,o.name,o.legal_name,o.bin,o.city,o.status,o.metadata,o.created_at,o.updated_at,
       (select count(*)::int from app.organization_products op where op.organization_id=o.id and op.status='active') products,
       (select count(*)::int from app.module_installations mi where mi.organization_id=o.id and mi.status='active') modules
       from app.organizations o order by o.created_at desc`);
