@@ -15,13 +15,13 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function Login({ onReady }: { onReady: (user: User) => void }) {
-  const [email, setEmail] = useState('admin@imdstech.net');
+  const [email, setEmail] = useState('admin@imds.kz');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError('');
     try { const result = await api<{ user: User }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }); onReady(result.user); }
-    catch { setError('Неверный email или пароль.'); }
+    catch (e) { setError(e instanceof Error ? `Ошибка входа: ${e.message}` : 'Ошибка входа.'); }
   };
   return <main className="vps-login"><form className="vps-login-card" onSubmit={submit}><div className="vps-brand">IMDS <span>Super Admin</span></div><h1>Вход в control plane</h1><p>Локальный VPS · PostgreSQL · realtime</p><label>Email<input value={email} onChange={e=>setEmail(e.target.value)} type="email" required /></label><label>Пароль<input value={password} onChange={e=>setPassword(e.target.value)} type="password" required /></label>{error&&<div className="vps-error">{error}</div>}<button type="submit">Войти</button></form></main>;
 }
