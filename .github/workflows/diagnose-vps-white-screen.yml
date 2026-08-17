@@ -6,6 +6,7 @@ on:
       - agent/vps-control-plane
     paths:
       - .github/workflows/diagnose-vps-white-screen.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -35,7 +36,7 @@ jobs:
           test -n "$CHROME"
           "$CHROME" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=6000 --dump-dom "$URL" > /tmp/dom.html 2>/tmp/chrome.err
           grep -q 'IMDS' /tmp/dom.html
-          grep -q 'Вход в control plane' /tmp/dom.html
+          grep -q 'Вход в платформу' /tmp/dom.html
           grep -q '<form' /tmp/dom.html
           if grep -q '<div id="root"></div>' /tmp/dom.html; then
             echo 'root is still empty' >&2
