@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const host = '127.0.0.1';
 const port = 4173;
@@ -60,8 +61,29 @@ function collectAssets(html) {
   return [...assets];
 }
 
-const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-const child = spawn(command, ['vite', 'preview', '--host', host, '--port', String(port), '--strictPort'], {
+async function stopServer(child) {
+  if (child.exitCode !== null) return;
+
+  child.kill('SIGTERM');
+  await new Promise((resolve) => {
+    const timer = setTimeout(resolve, 2000);
+    child.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+
+  if (child.exitCode === null) {
+    child.kill('SIGKILL');
+    await new Promise((resolve) => {
+      if (child.exitCode !== null) return resolve();
+      child.once('exit', resolve);
+    });
+  }
+}
+
+const viteCli = fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url));
+const child = spawn(process.execPath, [viteCli, 'preview', '--host', host, '--port', String(port), '--strictPort'], {
   env: { ...process.env, VITE_APP_ENV: 'demo' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -122,10 +144,5 @@ try {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
 } finally {
-  child.kill('SIGTERM');
-  await new Promise((resolve) => {
-    if (child.exitCode !== null) return resolve();
-    child.once('exit', resolve);
-    setTimeout(resolve, 2000);
-  });
+  await stopServer(child);
 }
