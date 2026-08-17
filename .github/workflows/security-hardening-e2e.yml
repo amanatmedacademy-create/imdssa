@@ -111,7 +111,7 @@ jobs:
           code="$(curl -sS -o /dev/null -w '%{http_code}' -c "$COOKIE_THREE" -H 'content-type: application/json' -H "X-Real-IP: $LOGIN_IP" -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD_TWO\"}" "$API/api/auth/login")"
           test "$code" = 200
 
-          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select action||'|'||coalesce(source_ip::text,'')||'|'||coalesce(request_id,'') from app.audit_logs where request_id='$REQUEST_ID' order by id desc limit 1" | grep -q "^auth.password.change|$LOGIN_IP|$REQUEST_ID$"
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select action||'|'||coalesce(host(source_ip),'')||'|'||coalesce(request_id,'') from app.audit_logs where request_id='$REQUEST_ID' order by id desc limit 1" | grep -q "^auth.password.change|$LOGIN_IP|$REQUEST_ID$"
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select count(*) from app.organizations where name='SHOULD-NOT-BE-CREATED'" | grep -q '^0$'
 
           echo 'security_e2e=passed'
