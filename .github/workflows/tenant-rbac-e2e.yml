@@ -1,0 +1,182 @@
+name: Tenant RBAC E2E
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.head_ref == 'agent/tenant-rbac-isolation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - name: Validate VPS access
+        run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Wait for matching feature release
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          for _ in $(seq 1 120); do
+            deployed="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "basename \"\$(readlink -f /var/www/imds-super-admin/current)\"" 2>/dev/null || true)"
+            if [ "$deployed" = "$GITHUB_SHA" ]; then
+              echo "release=$deployed"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Feature release $GITHUB_SHA was not deployed in time" >&2
+          exit 1
+      - name: Verify tenant isolation and RBAC
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          API=http://127.0.0.1:8788
+          TEST_ID="$(openssl rand -hex 6)"
+          ORG_A_NAME="RBAC-A-$TEST_ID"
+          ORG_B_NAME="RBAC-B-$TEST_ID"
+          PROD_A_CODE="e2e-a-$TEST_ID"
+          PROD_B_CODE="e2e-b-$TEST_ID"
+          MOD_A_CODE="e2e-mod-a-$TEST_ID"
+          MOD_B_CODE="e2e-mod-b-$TEST_ID"
+          EMAIL_A="rbac-a-$TEST_ID@invalid.imds"
+          EMAIL_B="rbac-b-$TEST_ID@invalid.imds"
+          EMAIL_C="rbac-c-$TEST_ID@invalid.imds"
+          TMP_DIR="/tmp/imdssa-rbac-$TEST_ID"
+          mkdir -p "$TMP_DIR"
+
+          psqlq() { sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --quiet --set=ON_ERROR_STOP=1 --command="$1"; }
+          cleanup() {
+            set +e
+            if [ -n "${USER_A_ID:-}" ] || [ -n "${USER_B_ID:-}" ] || [ -n "${USER_C_ID:-}" ]; then
+              sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 >/dev/null 2>&1 <<SQL
+          SET session_replication_role=replica;
+          DELETE FROM app.auth_sessions WHERE user_id IN (NULLIF('${USER_A_ID:-}','')::uuid,NULLIF('${USER_B_ID:-}','')::uuid,NULLIF('${USER_C_ID:-}','')::uuid) OR token_hash IN ('${ADMIN_TOKEN_HASH:-}');
+          DELETE FROM app.realtime_events WHERE payload->>'e2e'='$TEST_ID';
+          DELETE FROM app.module_installations WHERE organization_id IN (NULLIF('${ORG_A_ID:-}','')::uuid,NULLIF('${ORG_B_ID:-}','')::uuid);
+          DELETE FROM app.organization_products WHERE organization_id IN (NULLIF('${ORG_A_ID:-}','')::uuid,NULLIF('${ORG_B_ID:-}','')::uuid);
+          DELETE FROM app.product_tenant_bindings WHERE organization_id IN (NULLIF('${ORG_A_ID:-}','')::uuid,NULLIF('${ORG_B_ID:-}','')::uuid);
+          DELETE FROM app.control_commands WHERE organization_id IN (NULLIF('${ORG_A_ID:-}','')::uuid,NULLIF('${ORG_B_ID:-}','')::uuid);
+          DELETE FROM app.outbox_events WHERE payload->>'organizationId' IN ('${ORG_A_ID:-}','${ORG_B_ID:-}');
+          DELETE FROM app.organization_memberships WHERE user_id IN (NULLIF('${USER_A_ID:-}','')::uuid,NULLIF('${USER_B_ID:-}','')::uuid,NULLIF('${USER_C_ID:-}','')::uuid);
+          DELETE FROM app.platform_users WHERE id IN (NULLIF('${USER_A_ID:-}','')::uuid,NULLIF('${USER_B_ID:-}','')::uuid,NULLIF('${USER_C_ID:-}','')::uuid);
+          DELETE FROM app.modules WHERE code IN ('$MOD_A_CODE','$MOD_B_CODE');
+          DELETE FROM app.products WHERE code IN ('$PROD_A_CODE','$PROD_B_CODE');
+          DELETE FROM app.organizations WHERE id IN (NULLIF('${ORG_A_ID:-}','')::uuid,NULLIF('${ORG_B_ID:-}','')::uuid);
+          SET session_replication_role=origin;
+          SQL
+            fi
+            rm -rf "$TMP_DIR"
+          }
+          trap cleanup EXIT
+
+          test "$(psqlq "select to_regclass('app.organization_memberships') is not null")" = t
+
+          PASSWORD="Aa1!$(openssl rand -hex 12)"
+          HASH="$(PASSWORD="$PASSWORD" node --input-type=module -e "import { hashPassword } from '/opt/imds-super-admin/api/dist/security.js'; process.stdout.write(hashPassword(process.env.PASSWORD));")"
+
+          ORG_A_ID="$(psqlq "SET session_replication_role=replica; INSERT INTO app.organizations(name,status) VALUES ('$ORG_A_NAME','active') RETURNING id; SET session_replication_role=origin;")"
+          ORG_B_ID="$(psqlq "SET session_replication_role=replica; INSERT INTO app.organizations(name,status) VALUES ('$ORG_B_NAME','active') RETURNING id; SET session_replication_role=origin;")"
+          PROD_A_ID="$(psqlq "SET session_replication_role=replica; INSERT INTO app.products(code,name,status) VALUES ('$PROD_A_CODE','E2E Product A','active') RETURNING id; SET session_replication_role=origin;")"
+          PROD_B_ID="$(psqlq "SET session_replication_role=replica; INSERT INTO app.products(code,name,status) VALUES ('$PROD_B_CODE','E2E Product B','active') RETURNING id; SET session_replication_role=origin;")"
+          MOD_A_ID="$(psqlq "SET session_replication_role=replica; INSERT INTO app.modules(code,name,owner_product_id,status) VALUES ('$MOD_A_CODE','E2E Module A','$PROD_A_ID','published') RETURNING id; SET session_replication_role=origin;")"
+          MOD_B_ID="$(psqlq "SET session_replication_role=replica; INSERT INTO app.modules(code,name,owner_product_id,status) VALUES ('$MOD_B_CODE','E2E Module B','$PROD_B_ID','published') RETURNING id; SET session_replication_role=origin;")"
+
+          psqlq "SET session_replication_role=replica; INSERT INTO app.organization_products(organization_id,product_id,status) VALUES ('$ORG_A_ID','$PROD_A_ID','active'),('$ORG_B_ID','$PROD_B_ID','active'); INSERT INTO app.module_installations(organization_id,module_id,host_product_id,version,status) VALUES ('$ORG_A_ID','$MOD_A_ID','$PROD_A_ID','e2e','active'),('$ORG_B_ID','$MOD_B_ID','$PROD_B_ID','e2e','active'); SET session_replication_role=origin;" >/dev/null
+
+          USER_A_ID="$(psqlq "INSERT INTO app.platform_users(email,password_hash,full_name,global_role,is_active) VALUES ('$EMAIL_A','$HASH','RBAC A',NULL,true) RETURNING id")"
+          USER_B_ID="$(psqlq "INSERT INTO app.platform_users(email,password_hash,full_name,global_role,is_active) VALUES ('$EMAIL_B','$HASH','RBAC B',NULL,true) RETURNING id")"
+          USER_C_ID="$(psqlq "INSERT INTO app.platform_users(email,password_hash,full_name,global_role,is_active) VALUES ('$EMAIL_C','$HASH','RBAC C',NULL,true) RETURNING id")"
+
+          psqlq "INSERT INTO app.organization_memberships(user_id,organization_id,role,status) VALUES ('$USER_A_ID','$ORG_A_ID','owner','active'); INSERT INTO app.organization_memberships(user_id,organization_id,role,status,allowed_product_codes,allowed_module_codes) VALUES ('$USER_B_ID','$ORG_B_ID','member','active',ARRAY['$PROD_B_CODE']::text[],'{}'::text[]);" >/dev/null
+
+          TOKEN_A="$(openssl rand -hex 32)"; HASH_A="$(printf '%s' "$TOKEN_A" | sha256sum | awk '{print $1}')"
+          TOKEN_B="$(openssl rand -hex 32)"; HASH_B="$(printf '%s' "$TOKEN_B" | sha256sum | awk '{print $1}')"
+          TOKEN_C="$(openssl rand -hex 32)"; HASH_C="$(printf '%s' "$TOKEN_C" | sha256sum | awk '{print $1}')"
+          psqlq "INSERT INTO app.auth_sessions(user_id,token_hash,expires_at) VALUES ('$USER_A_ID','$HASH_A',now()+interval '20 minutes'),('$USER_B_ID','$HASH_B',now()+interval '20 minutes'),('$USER_C_ID','$HASH_C',now()+interval '20 minutes');" >/dev/null
+
+          curl -fsS -H "Cookie: imdssa_session=$TOKEN_A" "$API/api/auth/me" -o "$TMP_DIR/me-a.json"
+          python3 - "$TMP_DIR/me-a.json" "$ORG_A_ID" <<'PY'
+          import json,sys
+          data=json.load(open(sys.argv[1]))['user']
+          assert data['scope']=='tenant', data
+          assert data['role']=='owner', data
+          assert [x['organizationId'] for x in data['memberships']]==[sys.argv[2]], data
+          PY
+
+          code="$(curl -sS -o "$TMP_DIR/global-a.json" -w '%{http_code}' -H "Cookie: imdssa_session=$TOKEN_A" "$API/api/v1/organizations")"
+          test "$code" = 403
+          grep -q 'TENANT_SCOPE_REQUIRED' "$TMP_DIR/global-a.json"
+
+          for who in a b c; do :; done
+          curl -fsS -H "Cookie: imdssa_session=$TOKEN_A" "$API/api/tenant/v1/organizations" -o "$TMP_DIR/org-a.json"
+          curl -fsS -H "Cookie: imdssa_session=$TOKEN_B" "$API/api/tenant/v1/organizations" -o "$TMP_DIR/org-b.json"
+          curl -fsS -H "Cookie: imdssa_session=$TOKEN_C" "$API/api/tenant/v1/organizations" -o "$TMP_DIR/org-c.json"
+          python3 - "$TMP_DIR/org-a.json" "$TMP_DIR/org-b.json" "$TMP_DIR/org-c.json" "$ORG_A_ID" "$ORG_B_ID" <<'PY'
+          import json,sys
+          a=json.load(open(sys.argv[1]))['items']; b=json.load(open(sys.argv[2]))['items']; c=json.load(open(sys.argv[3]))['items']
+          assert [x['id'] for x in a]==[sys.argv[4]], a
+          assert [x['id'] for x in b]==[sys.argv[5]], b
+          assert c==[], c
+          PY
+
+          curl -fsS -H "Cookie: imdssa_session=$TOKEN_A" "$API/api/tenant/v1/products" -o "$TMP_DIR/prod-a.json"
+          curl -fsS -H "Cookie: imdssa_session=$TOKEN_B" "$API/api/tenant/v1/products" -o "$TMP_DIR/prod-b.json"
+          curl -fsS -H "Cookie: imdssa_session=$TOKEN_B" "$API/api/tenant/v1/modules" -o "$TMP_DIR/mod-b-before.json"
+          python3 - "$TMP_DIR/prod-a.json" "$TMP_DIR/prod-b.json" "$TMP_DIR/mod-b-before.json" "$PROD_A_CODE" "$PROD_B_CODE" <<'PY'
+          import json,sys
+          pa={x['code'] for x in json.load(open(sys.argv[1]))['items']}; pb={x['code'] for x in json.load(open(sys.argv[2]))['items']}; mb=json.load(open(sys.argv[3]))['items']
+          assert pa=={sys.argv[4]}, pa
+          assert pb=={sys.argv[5]}, pb
+          assert mb==[], mb
+          PY
+
+          psqlq "UPDATE app.organization_memberships SET allowed_module_codes=ARRAY['$MOD_B_CODE']::text[] WHERE user_id='$USER_B_ID' AND organization_id='$ORG_B_ID'" >/dev/null
+          curl -fsS -H "Cookie: imdssa_session=$TOKEN_B" "$API/api/tenant/v1/modules" -o "$TMP_DIR/mod-b-after.json"
+          curl -fsS -H "Cookie: imdssa_session=$TOKEN_B" "$API/api/tenant/v1/installations" -o "$TMP_DIR/inst-b.json"
+          python3 - "$TMP_DIR/mod-b-after.json" "$TMP_DIR/inst-b.json" "$MOD_B_CODE" <<'PY'
+          import json,sys
+          modules={x['code'] for x in json.load(open(sys.argv[1]))['items']}; installs={x['module_code'] for x in json.load(open(sys.argv[2]))['items']}
+          assert modules=={sys.argv[3]}, modules
+          assert installs=={sys.argv[3]}, installs
+          PY
+
+          ADMIN_ID="$(psqlq "select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end,created_at limit 1")"
+          test -n "$ADMIN_ID"
+          ADMIN_TOKEN="$(openssl rand -hex 32)"; ADMIN_TOKEN_HASH="$(printf '%s' "$ADMIN_TOKEN" | sha256sum | awk '{print $1}')"
+          psqlq "INSERT INTO app.auth_sessions(user_id,token_hash,expires_at) VALUES ('$ADMIN_ID','$ADMIN_TOKEN_HASH',now()+interval '10 minutes')" >/dev/null
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -H "Cookie: imdssa_session=$ADMIN_TOKEN" "$API/api/v1/organizations")" = 200
+
+          curl -sN --max-time 7 -H "Cookie: imdssa_session=$TOKEN_A" "$API/events" > "$TMP_DIR/sse-a.txt" 2>/dev/null & SSE_PID=$!
+          sleep 1
+          EVENT_B="$(psqlq "INSERT INTO app.realtime_events(topic,event_type,organization_id,payload) VALUES ('e2e','update','$ORG_B_ID',jsonb_build_object('e2e','$TEST_ID','marker','B')) RETURNING id")"
+          psqlq "select pg_notify('imds_realtime',json_build_object('id',$EVENT_B)::text)" >/dev/null
+          sleep 1
+          EVENT_A="$(psqlq "INSERT INTO app.realtime_events(topic,event_type,organization_id,payload) VALUES ('e2e','update','$ORG_A_ID',jsonb_build_object('e2e','$TEST_ID','marker','A')) RETURNING id")"
+          psqlq "select pg_notify('imds_realtime',json_build_object('id',$EVENT_A)::text)" >/dev/null
+          wait "$SSE_PID" || true
+          grep -q '"marker": "A"\|"marker":"A"' "$TMP_DIR/sse-a.txt"
+          if grep -q '"marker": "B"\|"marker":"B"' "$TMP_DIR/sse-a.txt"; then
+            echo 'Cross-tenant SSE leak detected' >&2
+            cat "$TMP_DIR/sse-a.txt" >&2
+            exit 1
+          fi
+
+          echo 'tenant_rbac_e2e=passed'
+          REMOTE
