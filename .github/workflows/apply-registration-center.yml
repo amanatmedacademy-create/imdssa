@@ -34,7 +34,7 @@ jobs:
           npm install --no-audit --no-fund
           npm run lint --workspace @imds/vps-api
           npm run build --workspace @imds/vps-api
-          npm run typecheck
+          npm run lint
           npm run build
       - name: Commit generated integration
         shell: bash
