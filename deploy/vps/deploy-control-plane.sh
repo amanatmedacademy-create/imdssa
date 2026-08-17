@@ -40,15 +40,24 @@ fi
 chown root:imdssa "$ENV_DIR/postgres.env"
 chmod 0640 "$ENV_DIR/postgres.env"
 
+if [ ! -f "$ENV_DIR/telegram.env" ]; then
+  cat > "$ENV_DIR/telegram.env" <<'EOF'
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+EOF
+fi
+chown root:imdssa "$ENV_DIR/telegram.env"
+chmod 0640 "$ENV_DIR/telegram.env"
+
 # The reconciliation and health workers touch the same control-plane tables that
-# migration 004 installs triggers on. Pause them briefly before DDL so repeat
-# deploys cannot deadlock with a live worker transaction. Commands remain durable
-# in PostgreSQL and are resumed after the migration completes.
+# migrations install triggers on. Pause them briefly before DDL so repeat deploys
+# cannot deadlock with a live worker transaction. Commands remain durable in
+# PostgreSQL and are resumed after the migration completes.
 systemctl stop imdssa-reconcile.timer imdssa-reconcile.service 2>/dev/null || true
 systemctl stop imdssa-product-monitor.timer imdssa-product-monitor.service 2>/dev/null || true
 
 install -d -o root -g postgres -m 0750 "$APP_DIR/migrations"
-for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql; do
+for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql 005_registration_notifications.sql; do
   install -o root -g postgres -m 0640 "$STAGE_DIR/$migration" "$APP_DIR/migrations/$migration"
   sudo -u postgres psql --set=ON_ERROR_STOP=1 --dbname=imdssa --file="$APP_DIR/migrations/$migration"
 done
@@ -84,9 +93,12 @@ Requires=postgresql.service
 Type=simple
 User=imdssa
 Group=imdssa
+SupplementaryGroups=imds-platform
 WorkingDirectory=/opt/imds-super-admin/api
 EnvironmentFile=/etc/imds-super-admin/postgres.env
 EnvironmentFile=/etc/imds-super-admin/api.env
+EnvironmentFile=/etc/imds-platform-control.env
+EnvironmentFile=-/etc/imds-super-admin/telegram.env
 ExecStart=/usr/bin/node /opt/imds-super-admin/api/dist/index.js
 Restart=always
 RestartSec=3
@@ -128,9 +140,6 @@ install -m 0644 "$STAGE_DIR/reconcile.timer" /etc/systemd/system/imdssa-reconcil
 nginx -t
 systemctl daemon-reload
 
-# enable --now does not restart an already-running service after its JavaScript
-# bundle changes. Always restart the API so the process and the deployed files
-# are the same release.
 systemctl enable imds-super-admin-api.service
 systemctl restart imds-super-admin-api.service
 
@@ -157,5 +166,6 @@ systemctl is-active --quiet postgresql
 systemctl is-active --quiet imdssa-product-monitor.timer
 systemctl is-active --quiet imdssa-reconcile.timer
 sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select code||'|'||last_health::text from app.products where code='imds-marketing'" | grep -q '^imds-marketing|'
+sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select case when to_regclass('app.registration_notifications') is null then 'missing' else 'ready' end" | grep -q '^ready$'
 
 echo "IMDS Super Admin deployed on port 8080"
