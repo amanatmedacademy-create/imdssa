@@ -1,0 +1,107 @@
+name: Apply Tenant RBAC to Main
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/apply-main-tenant-rbac.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-main-tenant-rbac
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply production RBAC diff onto current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA=dec4c051c160c11ed226992806a2d6ee7032520b
+          RBAC_SHA=24038328954da342e29cdae0a9cc53ae45cbbf24
+          git fetch origin "$RBAC_SHA"
+          git diff "$BASE_SHA" "$RBAC_SHA" -- \
+            apps/vps-api/src/index.ts \
+            apps/vps-api/src/tenantAccess.ts \
+            apps/vps-api/src/tenantRoutes.ts \
+            deploy/vps/migrations/006_tenant_rbac.sql \
+            src/vps/VpsApp.tsx > /tmp/tenant-rbac.patch
+          test -s /tmp/tenant-rbac.patch
+          git apply --3way /tmp/tenant-rbac.patch
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          deploy = Path('deploy/vps/deploy-control-plane.sh')
+          text = deploy.read_text()
+          old = '005_registration_notifications.sql 005_security_hardening.sql 007_notification_delivery_settings.sql; do'
+          new = '005_registration_notifications.sql 005_security_hardening.sql 006_tenant_rbac.sql 007_notification_delivery_settings.sql; do'
+          if new not in text:
+              if old not in text:
+                  raise SystemExit('deploy migration anchor not found')
+              text = text.replace(old, new, 1)
+          deploy.write_text(text)
+
+          workflow = Path('.github/workflows/deploy-vps-control-plane.yml')
+          text = workflow.read_text()
+          stage_007 = '          cp deploy/vps/migrations/007_notification_delivery_settings.sql .deploy-stage/007_notification_delivery_settings.sql\n'
+          stage_006 = '          cp deploy/vps/migrations/006_tenant_rbac.sql .deploy-stage/006_tenant_rbac.sql\n'
+          if stage_006 not in text:
+              if stage_007 not in text:
+                  raise SystemExit('deploy workflow migration anchor not found')
+              text = text.replace(stage_007, stage_006 + stage_007, 1)
+
+          membership_check = "          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command=\"select to_regclass('app.organization_memberships') is not null\" | grep -q '^t$'\n"
+          route_anchor = '            curl -fsS --max-time 15 -H "Cookie: imdssa_session=$TOKEN" "$API$route" >/dev/null\n          done\n'
+          if membership_check not in text:
+              if route_anchor not in text:
+                  raise SystemExit('deploy workflow verification anchor not found')
+              text = text.replace(route_anchor, route_anchor + membership_check, 1)
+          workflow.write_text(text)
+          PY
+
+          git diff --check
+      - name: Validate backend and frontend
+        shell: bash
+        env:
+          VITE_RUNTIME: vps
+          VITE_APP_ENV: production
+          VITE_APP_VERSION: 0.7.0
+          VITE_RELEASE_SHA: ${{ github.sha }}
+          IMDS_STRICT_ENV: 'true'
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run lint --workspace @imds/vps-api
+          npm run build --workspace @imds/vps-api
+          npm run lint
+          npm run build
+      - name: Commit production RBAC directly to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'IMDS Automation'
+          git config user.email 'automation@imds.local'
+          git rm .github/workflows/apply-main-tenant-rbac.yml
+          git add \
+            apps/vps-api/src/index.ts \
+            apps/vps-api/src/tenantAccess.ts \
+            apps/vps-api/src/tenantRoutes.ts \
+            deploy/vps/deploy-control-plane.sh \
+            deploy/vps/migrations/006_tenant_rbac.sql \
+            .github/workflows/deploy-vps-control-plane.yml \
+            src/vps/VpsApp.tsx
+          git diff --cached --check
+          git commit -m 'Add tenant-scoped RBAC isolation'
+          git push origin HEAD:main
