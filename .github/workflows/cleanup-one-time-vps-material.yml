@@ -1,0 +1,40 @@
+name: Cleanup one-time VPS material
+
+on:
+  push:
+    branches: [agent/vps-production-cleanup]
+    paths: [.github/workflows/cleanup-one-time-vps-material.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - name: Validate VPS access
+        run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Remove one-time credential material
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          rm -rf /root/imdssa-login-fix /root/imdssa-admin-reset
+          rm -f /tmp/imdssa-reset.bin
+          test ! -e /root/imdssa-login-fix
+          test ! -e /root/imdssa-admin-reset
+          test ! -e /tmp/imdssa-reset.bin
+          echo 'ONE_TIME_CREDENTIAL_MATERIAL=absent'
+          REMOTE
