@@ -16,13 +16,12 @@ jobs:
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_USER: ${{ secrets.VPS_USER }}
       VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
-      EXPECTED_SHA: 2fcab9ab35112ec3aca32aef9afe190cc5280568
     steps:
       - name: Validate VPS access
-        run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD" && test -n "$EXPECTED_SHA"'
+        run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
       - name: Install SSH client
         run: sudo apt-get update && sudo apt-get install -y sshpass
-      - name: Wait for matching feature release
+      - name: Wait for tenant feature runtime
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
@@ -30,14 +29,13 @@ jobs:
           export SSHPASS
           SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
           for _ in $(seq 1 120); do
-            deployed="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "basename \"\$(readlink -f /var/www/imds-super-admin/current)\"" 2>/dev/null || true)"
-            if [ "$deployed" = "$EXPECTED_SHA" ]; then
-              echo "release=$deployed"
+            if sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command=\"select to_regclass('app.organization_memberships') is not null\" | grep -q '^t$' && sudo grep -q 'TENANT_SCOPE_REQUIRED' /opt/imds-super-admin/api/dist/index.js && curl -fsS http://127.0.0.1:8788/healthz >/dev/null"; then
+              echo 'tenant_feature_runtime=ready'
               exit 0
             fi
             sleep 5
           done
-          echo "Feature release $EXPECTED_SHA was not deployed in time" >&2
+          echo 'Tenant feature runtime was not ready in time' >&2
           exit 1
       - name: Verify tenant isolation and RBAC
         env:
