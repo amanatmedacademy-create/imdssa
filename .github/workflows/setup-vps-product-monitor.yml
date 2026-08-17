@@ -3,7 +3,7 @@ name: Setup VPS Product Monitor
 on:
   push:
     branches:
-      - agent/vps-control-plane
+      - main
     paths:
       - deploy/vps/product-monitor.sh
       - deploy/vps/imdssa-product-monitor.service
