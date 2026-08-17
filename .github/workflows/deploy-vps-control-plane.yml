@@ -70,10 +70,19 @@ jobs:
             set -euo pipefail
             source /etc/imds-platform-control.env
             test -n \"\$IMDS_PLATFORM_CONTROL_TOKEN\"
-            curl -fsS --max-time 10 -H \"Authorization: Bearer \$IMDS_PLATFORM_CONTROL_TOKEN\" http://127.0.0.1:8787/internal/platform/info | grep -q '\"product\":\"imds-marketing\"'
-            curl -fsS --max-time 10 -H \"Authorization: Bearer \$IMDS_PLATFORM_CONTROL_TOKEN\" http://127.0.0.1:8787/internal/platform/tenants | grep -q '\"items\"'
+            info_code=\$(curl -sS --max-time 10 -o /tmp/imdssa-info.json -w "%{http_code}" -H \"Authorization: Bearer \$IMDS_PLATFORM_CONTROL_TOKEN\" http://127.0.0.1:8787/internal/platform/info || true)
+            tenants_code=\$(curl -sS --max-time 10 -o /tmp/imdssa-tenants.json -w "%{http_code}" -H \"Authorization: Bearer \$IMDS_PLATFORM_CONTROL_TOKEN\" http://127.0.0.1:8787/internal/platform/tenants || true)
+            echo \"platform_info_http=\$info_code\"
+            echo \"platform_tenants_http=\$tenants_code\"
+            if [ \"\$info_code\" != 200 ]; then cat /tmp/imdssa-info.json 2>/dev/null || true; exit 21; fi
+            if [ \"\$tenants_code\" != 200 ]; then cat /tmp/imdssa-tenants.json 2>/dev/null || true; exit 22; fi
+            grep -q '\"product\":\"imds-marketing\"' /tmp/imdssa-info.json
+            grep -q '\"items\"' /tmp/imdssa-tenants.json
+            echo \"reconcile_timer=\$(systemctl is-active imdssa-reconcile.timer)\"
+            echo \"monitor_timer=\$(systemctl is-active imdssa-product-monitor.timer)\"
             systemctl is-active --quiet imdssa-reconcile.timer
             systemctl is-active --quiet imdssa-product-monitor.timer
+            rm -f /tmp/imdssa-info.json /tmp/imdssa-tenants.json
           '"
       - name: Verify public endpoint
         run: |
