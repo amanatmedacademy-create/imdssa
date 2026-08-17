@@ -42,17 +42,20 @@ jobs:
           EXPECTED_SHA='b3905f97ad1e383a3e8f332fb7b0a106ea05db24'
           API=http://127.0.0.1:8788
 
+          echo '[1/6] release and services'
           test "$(basename "$(readlink -f /var/www/imds-super-admin/current)")" = "$EXPECTED_SHA"
-          test -d "/opt/imds-super-admin/releases/$EXPECTED_SHA"
+          test -d "/var/www/imds-super-admin/releases/$EXPECTED_SHA"
           systemctl is-active --quiet imds-super-admin-api.service
           systemctl is-active --quiet imdssa-reconcile.timer
           systemctl is-active --quiet imdssa-product-monitor.timer
           curl -fsS --max-time 10 "$API/healthz" >/dev/null
 
+          echo '[2/6] security schema'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --set=ON_ERROR_STOP=1 --command="select to_regclass('app.login_attempts') is not null" | grep -q '^t$'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --set=ON_ERROR_STOP=1 --command="select count(*) from information_schema.columns where table_schema='app' and table_name='platform_users' and column_name in ('failed_login_attempts','locked_until','password_changed_at','last_login_ip')" | grep -q '^4$'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --set=ON_ERROR_STOP=1 --command="select count(*) from information_schema.columns where table_schema='app' and table_name='auth_sessions' and column_name in ('source_ip','user_agent')" | grep -q '^2$'
 
+          echo '[3/6] authenticated API'
           TOKEN="$(openssl rand -hex 32)"
           TOKEN_HASH="$(printf '%s' "$TOKEN" | sha256sum | awk '{print $1}')"
           ADMIN_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end, created_at limit 1")"
@@ -67,15 +70,18 @@ jobs:
             curl -fsS --max-time 10 -H "Cookie: imdssa_session=$TOKEN" "$API$route" >/dev/null
           done
 
+          echo '[4/6] nginx security headers'
           headers="$(curl -sSI --max-time 10 http://127.0.0.1:8080/)"
           printf '%s\n' "$headers" | grep -qi '^X-Content-Type-Options: nosniff'
           printf '%s\n' "$headers" | grep -qi '^X-Frame-Options: DENY'
           printf '%s\n' "$headers" | grep -qi '^Referrer-Policy: no-referrer'
           printf '%s\n' "$headers" | grep -qi '^Permissions-Policy:'
 
+          echo '[5/6] marketing control channel'
           source /etc/imds-platform-control.env
           test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
           curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info | grep -q 'imds-marketing'
 
+          echo '[6/6] production verification complete'
           echo 'security_production_verification=passed'
           REMOTE
