@@ -14,7 +14,8 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 id -u imdssa >/dev/null 2>&1 || useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin imdssa
-install -d -o imdssa -g imdssa -m 0750 "$APP_DIR" "$API_DIR"
+install -d -o root -g root -m 0755 "$APP_DIR"
+install -d -o imdssa -g imdssa -m 0750 "$API_DIR"
 install -d -m 0755 "$WEB_ROOT/releases/$RELEASE_SHA"
 install -d -m 0750 "$ENV_DIR"
 
