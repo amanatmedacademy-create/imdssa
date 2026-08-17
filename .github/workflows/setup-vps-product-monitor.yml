@@ -55,5 +55,5 @@ jobs:
             sudo systemctl enable --now imdssa-product-monitor.timer
             sudo systemctl start imdssa-product-monitor.service
             sudo systemctl is-active imdssa-product-monitor.timer
-            sudo -u postgres psql -d imdssa -Atc "select code || ''|'' || last_health::text || ''|'' || coalesce(last_latency_ms::text,''-'') from app.products where code=''imds-marketing''"
+            sudo -u postgres psql -d imdssa -AtF "|" -c "select code,last_health,last_latency_ms from app.products order by code" | grep "^imds-marketing|"
           '
