@@ -1,7 +1,7 @@
 name: Deploy VPS Control Plane
 on:
   push:
-    branches: [main]
+    branches: [main, 'agent/vps-security-hardening-v2']
   workflow_dispatch:
 permissions:
   contents: read
@@ -44,6 +44,7 @@ jobs:
           cp deploy/vps/migrations/003_platform_management.sql .deploy-stage/003_platform_management.sql
           cp deploy/vps/migrations/004_control_plane_sync.sql .deploy-stage/004_control_plane_sync.sql
           cp deploy/vps/migrations/005_registration_notifications.sql .deploy-stage/005_registration_notifications.sql
+          cp deploy/vps/migrations/005_security_hardening.sql .deploy-stage/005_security_hardening.sql
           cp deploy/vps/nginx-super-admin.conf .deploy-stage/nginx.conf
           cp deploy/vps/deploy-control-plane.sh .deploy-stage/deploy-control-plane.sh
           cp deploy/vps/product-monitor.sh .deploy-stage/product-monitor.sh
