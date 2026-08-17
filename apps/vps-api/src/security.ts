@@ -14,6 +14,16 @@ export function verifyPassword(password: string, encoded: string): boolean {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+export function validatePassword(password: string): string | null {
+  if (password.length < 16) return 'PASSWORD_TOO_SHORT';
+  if (!/[a-z]/.test(password)) return 'PASSWORD_LOWERCASE_REQUIRED';
+  if (!/[A-Z]/.test(password)) return 'PASSWORD_UPPERCASE_REQUIRED';
+  if (!/[0-9]/.test(password)) return 'PASSWORD_NUMBER_REQUIRED';
+  if (!/[^A-Za-z0-9]/.test(password)) return 'PASSWORD_SYMBOL_REQUIRED';
+  if (/\s/.test(password)) return 'PASSWORD_WHITESPACE_NOT_ALLOWED';
+  return null;
+}
+
 export function createSessionToken(): { token: string; hash: string } {
   const token = randomBytes(32).toString('base64url');
   return { token, hash: hashToken(token) };
