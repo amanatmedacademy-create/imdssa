@@ -20,7 +20,9 @@ jobs:
         with:
           node-version: 22
       - name: Apply integration
-        run: python3 scripts/apply-tenant-rbac.py
+        run: |
+          sed -i 's/^replacement = """/replacement = r"""/' scripts/apply-tenant-rbac.py
+          python3 scripts/apply-tenant-rbac.py
       - name: Validate
         run: |
           npm install --no-audit --no-fund
