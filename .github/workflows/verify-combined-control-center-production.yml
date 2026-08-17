@@ -15,7 +15,7 @@ jobs:
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_USER: ${{ secrets.VPS_USER }}
       VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
-      EXPECTED_SHA: 8a27578f381bd3b8a4b63369f6fae0f873011764
+      EXPECTED_SHA: 1ce494ba2cece81b7b96e767eac7f19f7047a996
     steps:
       - name: Validate VPS secrets
         run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
@@ -39,7 +39,7 @@ jobs:
 
           sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
           set -euo pipefail
-          EXPECTED_SHA=8a27578f381bd3b8a4b63369f6fae0f873011764
+          EXPECTED_SHA=1ce494ba2cece81b7b96e767eac7f19f7047a996
           API=http://127.0.0.1:8788
 
           test "$(basename "$(readlink -f /var/www/imds-super-admin/current)")" = "$EXPECTED_SHA"
