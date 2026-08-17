@@ -1,0 +1,79 @@
+name: Tenant RBAC Feature Deploy
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tenant-rbac-feature-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.head_ref == 'agent/tenant-rbac-isolation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint --workspace @imds/vps-api
+      - run: npm run build --workspace @imds/vps-api
+      - name: Build VPS frontend
+        env:
+          VITE_RUNTIME: vps
+          VITE_APP_ENV: production
+          VITE_APP_VERSION: 0.7.0
+          VITE_RELEASE_SHA: ${{ github.event.pull_request.head.sha }}
+          IMDS_STRICT_ENV: 'true'
+        run: npm run build
+      - run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Stage feature release
+        run: |
+          mkdir -p .deploy-stage/web .deploy-stage/api/dist
+          cp -a dist/. .deploy-stage/web/
+          cp -a apps/vps-api/dist/. .deploy-stage/api/dist/
+          cp apps/vps-api/package.json .deploy-stage/api/package.json
+          for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql 005_registration_notifications.sql 005_security_hardening.sql 006_tenant_rbac.sql; do
+            cp "deploy/vps/migrations/$migration" ".deploy-stage/$migration"
+          done
+          cp deploy/vps/nginx-super-admin.conf .deploy-stage/nginx.conf
+          cp deploy/vps/deploy-control-plane.sh .deploy-stage/deploy-control-plane.sh
+          cp deploy/vps/product-monitor.sh .deploy-stage/product-monitor.sh
+          cp deploy/vps/imdssa-product-monitor.service .deploy-stage/product-monitor.service
+          cp deploy/vps/imdssa-product-monitor.timer .deploy-stage/product-monitor.timer
+          cp deploy/vps/imdssa-reconcile.service .deploy-stage/reconcile.service
+          cp deploy/vps/imdssa-reconcile.timer .deploy-stage/reconcile.timer
+      - name: Upload and deploy feature release
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+          RELEASE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=20 -o ServerAliveCountMax=30)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'rm -rf /tmp/imdssa-release && mkdir -p /tmp/imdssa-release'
+          sshpass -e scp "${SSH_ARGS[@]}" -r .deploy-stage/. "$VPS_USER@$VPS_HOST:/tmp/imdssa-release/"
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo install -m 0750 /tmp/imdssa-release/deploy-control-plane.sh /opt/imds-super-admin/deploy-control-plane.sh && sudo /opt/imds-super-admin/deploy-control-plane.sh '$RELEASE_SHA' /tmp/imdssa-release"
+      - name: Verify feature release
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+          RELEASE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          deployed="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "basename \"\$(readlink -f /var/www/imds-super-admin/current)\"")"
+          test "$deployed" = "$RELEASE_SHA"
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command=\"select to_regclass('app.organization_memberships') is not null\"" | grep -q '^t$'
+          curl -fsS --max-time 20 "http://$VPS_HOST:8080/healthz" >/dev/null
