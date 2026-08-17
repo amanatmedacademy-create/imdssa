@@ -56,6 +56,11 @@ function sse(res: ServerResponse, event: unknown) {
   res.write(`event: update\ndata: ${JSON.stringify(event)}\n\n`);
 }
 
+async function audit(userId: string, action: string, targetType: string, targetId: string | null, beforeState: unknown, afterState: unknown) {
+  await pool.query(`insert into app.audit_logs(actor_user_id,action,target_type,target_id,before_state,after_state)
+    values($1,$2,$3,$4,$5::jsonb,$6::jsonb)`, [userId, action, targetType, targetId, beforeState ? JSON.stringify(beforeState) : null, afterState ? JSON.stringify(afterState) : null]);
+}
+
 async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const method = req.method || 'GET';
@@ -115,46 +120,109 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
 
   if (url.pathname === '/api/v1/organizations' && method === 'GET') {
-    const result = await pool.query('select id,external_key,name,legal_name,bin,city,status,created_at,updated_at from app.organizations order by created_at desc');
+    const result = await pool.query(`select o.id,o.external_key,o.name,o.legal_name,o.bin,o.city,o.status,o.created_at,o.updated_at,
+      (select count(*)::int from app.organization_products op where op.organization_id=o.id and op.status='active') products,
+      (select count(*)::int from app.module_installations mi where mi.organization_id=o.id and mi.status='active') modules
+      from app.organizations o order by o.created_at desc`);
     return json(res, 200, { items: result.rows });
   }
   if (url.pathname === '/api/v1/organizations' && method === 'POST') {
     const data = await body(req);
+    const name = String(data.name || '').trim();
+    if (!name) return json(res, 400, { error: 'ORGANIZATION_NAME_REQUIRED' });
     const result = await pool.query(`insert into app.organizations(external_key,name,legal_name,bin,city,status)
       values(nullif($1,''),$2,nullif($3,''),nullif($4,''),nullif($5,''),coalesce(nullif($6,''),'active')::app.organization_status)
-      returning *`, [String(data.externalKey||''), String(data.name||''), String(data.legalName||''), String(data.bin||''), String(data.city||''), String(data.status||'active')]);
-    await pool.query(`insert into app.audit_logs(actor_user_id,action,target_type,target_id,after_state) values($1,'organization.create','organization',$2,$3)`, [user.id, result.rows[0].id, result.rows[0]]);
+      returning *`, [String(data.externalKey||''), name, String(data.legalName||''), String(data.bin||''), String(data.city||''), String(data.status||'active')]);
+    await audit(user.id, 'organization.create', 'organization', result.rows[0].id, null, result.rows[0]);
     return json(res, 201, result.rows[0]);
+  }
+
+  const orgMatch = url.pathname.match(/^\/api\/v1\/organizations\/([0-9a-f-]+)$/i);
+  if (orgMatch && method === 'PATCH') {
+    const data = await body(req);
+    const before = await pool.query('select * from app.organizations where id=$1', [orgMatch[1]]);
+    if (!before.rowCount) return json(res, 404, { error: 'ORGANIZATION_NOT_FOUND' });
+    const result = await pool.query(`update app.organizations set
+      name=coalesce(nullif($2,''),name), legal_name=coalesce($3,legal_name), bin=coalesce($4,bin), city=coalesce($5,city),
+      status=coalesce(nullif($6,''),status::text)::app.organization_status where id=$1 returning *`,
+      [orgMatch[1], String(data.name||''), data.legalName ?? null, data.bin ?? null, data.city ?? null, String(data.status||'')]);
+    await audit(user.id, 'organization.update', 'organization', orgMatch[1], before.rows[0], result.rows[0]);
+    return json(res, 200, result.rows[0]);
   }
 
   if (url.pathname === '/api/v1/products' && method === 'GET') {
     const result = await pool.query(`select p.*, (select count(*)::int from app.organization_products op where op.product_id=p.id and op.status='active') tenants from app.products p order by created_at desc`);
     return json(res, 200, { items: result.rows });
   }
-  if (url.pathname === '/api/v1/products' && method === 'POST') {
-    const data = await body(req);
-    const result = await pool.query(`insert into app.products(code,name,description,status,version,adapter_base_url,healthcheck_url)
-      values($1,$2,$3,coalesce(nullif($4,''),'draft')::app.product_status,nullif($5,''),nullif($6,''),nullif($7,''))
-      on conflict(code) do update set name=excluded.name,description=excluded.description,status=excluded.status,version=excluded.version,adapter_base_url=excluded.adapter_base_url,healthcheck_url=excluded.healthcheck_url
-      returning *`, [String(data.code||''),String(data.name||''),String(data.description||''),String(data.status||'draft'),String(data.version||''),String(data.adapterBaseUrl||''),String(data.healthcheckUrl||'')]);
-    return json(res, 200, result.rows[0]);
-  }
 
   if (url.pathname === '/api/v1/modules' && method === 'GET') {
-    const result = await pool.query(`select m.*,p.code owner_product_code,p.name owner_product_name from app.modules m left join app.products p on p.id=m.owner_product_id order by m.created_at desc`);
+    const result = await pool.query(`select m.*,p.code owner_product_code,p.name owner_product_name from app.modules m left join app.products p on p.id=m.owner_product_id order by p.name,m.category,m.name`);
     return json(res, 200, { items: result.rows });
   }
-  if (url.pathname === '/api/v1/modules' && method === 'POST') {
+
+  if (url.pathname === '/api/v1/organization-products' && method === 'GET') {
+    const result = await pool.query(`select op.organization_id,op.product_id,op.status,op.config,op.created_at,op.updated_at,
+      o.name organization_name,p.code product_code,p.name product_name
+      from app.organization_products op join app.organizations o on o.id=op.organization_id join app.products p on p.id=op.product_id
+      order by o.name,p.name`);
+    return json(res, 200, { items: result.rows });
+  }
+  if (url.pathname === '/api/v1/organization-products' && method === 'POST') {
     const data = await body(req);
-    const owner = String(data.ownerProductId||'') || null;
-    const result = await pool.query(`insert into app.modules(code,name,description,category,owner_product_id,status,current_version,default_route,placement,permissions,limits)
-      values($1,$2,$3,$4,$5,coalesce(nullif($6,''),'draft')::app.module_status,nullif($7,''),nullif($8,''),nullif($9,''),$10::jsonb,$11::jsonb)
-      on conflict(code) do update set name=excluded.name,description=excluded.description,category=excluded.category,owner_product_id=excluded.owner_product_id,status=excluded.status,current_version=excluded.current_version,default_route=excluded.default_route,placement=excluded.placement,permissions=excluded.permissions,limits=excluded.limits returning *`, [String(data.code||''),String(data.name||''),String(data.description||''),String(data.category||'general'),owner,String(data.status||'draft'),String(data.version||''),String(data.defaultRoute||''),String(data.placement||''),JSON.stringify(data.permissions||[]),JSON.stringify(data.limits||{})]);
+    const organizationId = String(data.organizationId || '');
+    const productId = String(data.productId || '');
+    if (!organizationId || !productId) return json(res, 400, { error: 'ORGANIZATION_AND_PRODUCT_REQUIRED' });
+    const previous = await pool.query('select * from app.organization_products where organization_id=$1 and product_id=$2', [organizationId, productId]);
+    const result = await pool.query(`insert into app.organization_products(organization_id,product_id,status,config)
+      values($1,$2,coalesce(nullif($3,''),'active')::app.installation_status,$4::jsonb)
+      on conflict(organization_id,product_id) do update set status=excluded.status,config=excluded.config,updated_at=now() returning *`,
+      [organizationId, productId, String(data.status || 'active'), JSON.stringify(data.config || {})]);
+    await audit(user.id, 'organization_product.upsert', 'organization_product', `${organizationId}:${productId}`, previous.rows[0] || null, result.rows[0]);
     return json(res, 200, result.rows[0]);
   }
 
   if (url.pathname === '/api/v1/installations' && method === 'GET') {
-    const result = await pool.query(`select i.*,o.name organization_name,m.code module_code,m.name module_name,p.code host_product_code,p.name host_product_name from app.module_installations i join app.organizations o on o.id=i.organization_id join app.modules m on m.id=i.module_id join app.products p on p.id=i.host_product_id order by i.updated_at desc`);
+    const result = await pool.query(`select i.*,o.name organization_name,m.code module_code,m.name module_name,p.code host_product_code,p.name host_product_name
+      from app.module_installations i join app.organizations o on o.id=i.organization_id join app.modules m on m.id=i.module_id join app.products p on p.id=i.host_product_id
+      order by o.name,m.name`);
+    return json(res, 200, { items: result.rows });
+  }
+  if (url.pathname === '/api/v1/installations' && method === 'POST') {
+    const data = await body(req);
+    const organizationId = String(data.organizationId || '');
+    const moduleId = String(data.moduleId || '');
+    const hostProductId = String(data.hostProductId || '');
+    if (!organizationId || !moduleId || !hostProductId) return json(res, 400, { error: 'INSTALLATION_TARGET_REQUIRED' });
+    const entitled = await pool.query(`select 1 from app.organization_products where organization_id=$1 and product_id=$2 and status='active'`, [organizationId, hostProductId]);
+    if (!entitled.rowCount) return json(res, 409, { error: 'PRODUCT_NOT_ENABLED_FOR_ORGANIZATION' });
+    const moduleRow = await pool.query('select * from app.modules where id=$1 and owner_product_id=$2 and status=$3', [moduleId, hostProductId, 'published']);
+    if (!moduleRow.rowCount) return json(res, 409, { error: 'MODULE_NOT_AVAILABLE_FOR_PRODUCT' });
+    const previous = await pool.query('select * from app.module_installations where organization_id=$1 and module_id=$2 and host_product_id=$3', [organizationId, moduleId, hostProductId]);
+    const version = String(data.version || moduleRow.rows[0].current_version || '') || null;
+    const result = await pool.query(`insert into app.module_installations(organization_id,module_id,host_product_id,version,status,health,route,placement,permissions,limits,config)
+      values($1,$2,$3,$4,coalesce(nullif($5,''),'active')::app.installation_status,'unknown'::app.health_status,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb)
+      on conflict(organization_id,module_id,host_product_id) do update set version=excluded.version,status=excluded.status,route=excluded.route,placement=excluded.placement,
+      permissions=excluded.permissions,limits=excluded.limits,config=excluded.config,revision=app.module_installations.revision+1,updated_at=now() returning *`,
+      [organizationId,moduleId,hostProductId,version,String(data.status||'active'),moduleRow.rows[0].default_route,moduleRow.rows[0].placement,JSON.stringify(moduleRow.rows[0].permissions||[]),JSON.stringify(moduleRow.rows[0].limits||{}),JSON.stringify(data.config||{})]);
+    await audit(user.id, 'module_installation.upsert', 'module_installation', result.rows[0].id, previous.rows[0] || null, result.rows[0]);
+    return json(res, 200, result.rows[0]);
+  }
+
+  const installationMatch = url.pathname.match(/^\/api\/v1\/installations\/([0-9a-f-]+)$/i);
+  if (installationMatch && method === 'PATCH') {
+    const data = await body(req);
+    const before = await pool.query('select * from app.module_installations where id=$1', [installationMatch[1]]);
+    if (!before.rowCount) return json(res, 404, { error: 'INSTALLATION_NOT_FOUND' });
+    const result = await pool.query(`update app.module_installations set
+      status=coalesce(nullif($2,''),status::text)::app.installation_status,
+      config=coalesce($3::jsonb,config),revision=revision+1,updated_at=now()
+      where id=$1 returning *`, [installationMatch[1], String(data.status||''), data.config === undefined ? null : JSON.stringify(data.config)]);
+    await audit(user.id, 'module_installation.update', 'module_installation', installationMatch[1], before.rows[0], result.rows[0]);
+    return json(res, 200, result.rows[0]);
+  }
+
+  if (url.pathname === '/api/v1/audit' && method === 'GET') {
+    const result = await pool.query(`select a.*,u.email actor_email from app.audit_logs a left join app.platform_users u on u.id=a.actor_user_id order by a.created_at desc limit 100`);
     return json(res, 200, { items: result.rows });
   }
 

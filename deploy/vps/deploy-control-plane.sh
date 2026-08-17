@@ -27,8 +27,10 @@ chown root:imdssa "$ENV_DIR/postgres.env"
 chmod 0640 "$ENV_DIR/postgres.env"
 
 install -d -o root -g postgres -m 0750 "$APP_DIR/migrations"
-install -o root -g postgres -m 0640 "$STAGE_DIR/002_auth_sessions.sql" "$APP_DIR/migrations/002_auth_sessions.sql"
-sudo -u postgres psql --set=ON_ERROR_STOP=1 --dbname=imdssa --file="$APP_DIR/migrations/002_auth_sessions.sql"
+for migration in 002_auth_sessions.sql 003_platform_management.sql; do
+  install -o root -g postgres -m 0640 "$STAGE_DIR/$migration" "$APP_DIR/migrations/$migration"
+  sudo -u postgres psql --set=ON_ERROR_STOP=1 --dbname=imdssa --file="$APP_DIR/migrations/$migration"
+done
 
 rm -rf "$WEB_ROOT/releases/$RELEASE_SHA"/*
 cp -a "$STAGE_DIR/web/." "$WEB_ROOT/releases/$RELEASE_SHA/"
@@ -95,9 +97,16 @@ fi
 
 install -m 0644 "$STAGE_DIR/nginx.conf" /etc/nginx/sites-available/imds-super-admin
 ln -sfn /etc/nginx/sites-available/imds-super-admin /etc/nginx/sites-enabled/imds-super-admin
+
+install -m 0755 "$STAGE_DIR/product-monitor.sh" /usr/local/sbin/imdssa-product-monitor
+install -m 0644 "$STAGE_DIR/product-monitor.service" /etc/systemd/system/imdssa-product-monitor.service
+install -m 0644 "$STAGE_DIR/product-monitor.timer" /etc/systemd/system/imdssa-product-monitor.timer
+
 nginx -t
 systemctl daemon-reload
 systemctl enable --now imds-super-admin-api.service
+systemctl enable --now imdssa-product-monitor.timer
+systemctl start imdssa-product-monitor.service || true
 systemctl reload nginx
 
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
@@ -108,6 +117,8 @@ curl --fail --silent --show-error http://127.0.0.1:8788/healthz >/dev/null
 curl --fail --silent --show-error http://127.0.0.1:8080/healthz >/dev/null
 systemctl is-active --quiet imds-super-admin-api.service
 systemctl is-active --quiet postgresql
+systemctl is-active --quiet imdssa-product-monitor.timer
+
+sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select code||'|'||last_health::text from app.products where code='imds-marketing'" | grep -q '^imds-marketing|'
 
 echo "IMDS Super Admin deployed on port 8080"
-echo "Initial credentials are stored root-only at /root/imdssa-initial-admin.txt when first created"
