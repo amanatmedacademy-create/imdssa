@@ -1,0 +1,112 @@
+name: Sync Security With Main
+on:
+  push:
+    branches: ['agent/vps-security-hardening']
+permissions:
+  contents: write
+jobs:
+  sync:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/vps-security-hardening
+          fetch-depth: 0
+      - name: Merge latest main and reconcile known overlaps
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+          git merge --no-commit --no-ff origin/main || true
+          unresolved="$(git diff --name-only --diff-filter=U || true)"
+          allowed=$'.github/workflows/deploy-vps-control-plane.yml\napps/vps-api/src/index.ts\ndeploy/vps/deploy-control-plane.sh'
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            if ! printf '%s\n' "$allowed" | grep -Fxq "$path"; then
+              echo "Unexpected merge conflict: $path" >&2
+              exit 1
+            fi
+          done <<< "$unresolved"
+
+          git checkout --ours apps/vps-api/src/index.ts
+          git checkout --theirs deploy/vps/deploy-control-plane.sh
+          git checkout --theirs .github/workflows/deploy-vps-control-plane.yml
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if old not in text:
+                  raise SystemExit(f'missing target: {label}')
+              return text.replace(old, new, 1)
+
+          p = Path('apps/vps-api/src/index.ts')
+          text = p.read_text()
+          text = replace_once(
+              text,
+              "import pg from 'pg';\nimport { createSessionToken, hashPassword, hashToken, validatePassword, verifyPassword } from './security.js';",
+              "import pg from 'pg';\nimport { handleInternalRegistrationEvent } from './registrationNotifications.js';\nimport { createSessionToken, hashPassword, hashToken, validatePassword, verifyPassword } from './security.js';",
+              'registration import',
+          )
+          health = """  if (url.pathname === '/healthz') {
+            const db = await pool.query('select current_database() as database, now() as time');
+            return json(res, 200, { status: 'healthy', service: 'imdssa-api', database: db.rows[0].database, time: db.rows[0].time });
+          }
+          """.replace('          ', '')
+          text = replace_once(text, health, health + "\n  if (await handleInternalRegistrationEvent(req, res, pool, url, method)) return;\n", 'internal registration handler')
+          user_marker = "  const user = await requireUser(req, res); if (!user) return;\n"
+          notification_routes = """
+
+          if (url.pathname === '/api/v1/notifications' && method === 'GET') {
+            const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 20), 1), 100);
+            const result = await pool.query(`select id,event_id,source_product_code,external_tenant_id,organization_id,company_name,owner_name,owner_email,owner_phone,
+              trial_status,trial_started_at,trial_ends_at,telegram_status,telegram_error,read_at,created_at
+              from app.registration_notifications order by created_at desc limit $1`, [limit]);
+            const unread = await pool.query('select count(*)::int as count from app.registration_notifications where read_at is null');
+            return json(res, 200, { items: result.rows, unread: unread.rows[0]?.count || 0 });
+          }
+
+          const notificationReadMatch = url.pathname.match(/^\/api\/v1\/notifications\/([0-9a-f-]+)\/read$/i);
+          if (notificationReadMatch && method === 'PATCH') {
+            const result = await pool.query('update app.registration_notifications set read_at=coalesce(read_at,now()),updated_at=now() where id=$1 returning id,read_at', [notificationReadMatch[1]]);
+            if (!result.rowCount) return json(res, 404, { error: 'NOTIFICATION_NOT_FOUND' });
+            return json(res, 200, result.rows[0]);
+          }
+          """.replace('          ', '')
+          # Insert only after the post-SSE authenticated user gate, not the auth endpoints.
+          sse_close = "    return;\n  }\n\n  const user = await requireUser(req, res); if (!user) return;\n"
+          text = replace_once(text, sse_close, sse_close + notification_routes, 'notification routes')
+          p.write_text(text)
+
+          p = Path('deploy/vps/deploy-control-plane.sh')
+          text = p.read_text()
+          text = replace_once(
+              text,
+              'for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql 005_registration_notifications.sql; do',
+              'for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql 005_registration_notifications.sql 005_security_hardening.sql; do',
+              'migration order',
+          )
+          p.write_text(text)
+
+          p = Path('.github/workflows/deploy-vps-control-plane.yml')
+          text = p.read_text()
+          text = replace_once(
+              text,
+              '          cp deploy/vps/migrations/005_registration_notifications.sql .deploy-stage/005_registration_notifications.sql\n',
+              '          cp deploy/vps/migrations/005_registration_notifications.sql .deploy-stage/005_registration_notifications.sql\n          cp deploy/vps/migrations/005_security_hardening.sql .deploy-stage/005_security_hardening.sql\n',
+              'stage security migration',
+          )
+          p.write_text(text)
+          PY
+
+          git add .github/workflows/deploy-vps-control-plane.yml apps/vps-api/src/index.ts deploy/vps/deploy-control-plane.sh
+          if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+            git diff --name-only --diff-filter=U >&2
+            exit 1
+          fi
+          git commit -m 'merge latest main into VPS security hardening'
+          git push origin HEAD:agent/vps-security-hardening
