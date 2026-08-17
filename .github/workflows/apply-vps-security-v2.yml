@@ -1,0 +1,32 @@
+name: Apply VPS Security V2
+on:
+  push:
+    branches: ['agent/vps-security-hardening-v2']
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/vps-security-hardening-v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply security integration
+        run: python3 scripts/apply-vps-security-v2.py
+      - name: Validate combined runtime
+        run: |
+          npm install --no-audit --no-fund
+          npm run lint --workspace @imds/vps-api
+          npm run build --workspace @imds/vps-api
+          npx tsc --noEmit
+      - name: Commit integrated security runtime
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/vps-api/src/index.ts deploy/vps/deploy-control-plane.sh .github/workflows/deploy-vps-control-plane.yml
+          git commit -m 'integrate VPS security with registration runtime'
+          git push origin HEAD:agent/vps-security-hardening-v2
