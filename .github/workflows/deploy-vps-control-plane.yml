@@ -59,7 +59,7 @@ jobs:
           sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'rm -rf /tmp/imdssa-release && mkdir -p /tmp/imdssa-release'
           sshpass -e scp "${SSH_ARGS[@]}" -r .deploy-stage/. "$VPS_USER@$VPS_HOST:/tmp/imdssa-release/"
           sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo install -m 0750 /tmp/imdssa-release/deploy-control-plane.sh /opt/imds-super-admin/deploy-control-plane.sh && sudo /opt/imds-super-admin/deploy-control-plane.sh '${GITHUB_SHA}' /tmp/imdssa-release"
-      - name: Verify local Marketing control channel
+      - name: Verify Super Admin authenticated runtime
         shell: bash
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
@@ -69,43 +69,36 @@ jobs:
           SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
           sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
           set -euo pipefail
-          source /etc/imds-platform-control.env
-          test -n "${IMDS_PLATFORM_CONTROL_TOKEN:-}"
-
-          info="$(curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info)"
-          printf '%s\n' "$info" | grep -q '"product":"imds-marketing"'
-          echo 'MARKETING_PLATFORM_INFO=ok'
-
-          tenants="$(curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/tenants)"
-          printf '%s\n' "$tenants" | grep -q '"items"'
-          echo 'MARKETING_TENANT_DIRECTORY=ok'
-
-          echo "RECONCILE_TIMER=$(systemctl is-active imdssa-reconcile.timer)"
-          echo "MONITOR_TIMER=$(systemctl is-active imdssa-product-monitor.timer)"
-          systemctl is-active --quiet imdssa-reconcile.timer
-          systemctl is-active --quiet imdssa-product-monitor.timer
-
-          systemctl start imdssa-reconcile.service || true
-          sleep 2
-
-          echo 'CONTROL_BINDINGS'
-          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --field-separator='|' --command="
-            select o.name,p.code,coalesce(b.remote_tenant_id,''),b.desired_revision,b.actual_revision,b.sync_status,coalesce(b.last_error,'')
-            from app.product_tenant_bindings b
-            join app.organizations o on o.id=b.organization_id
-            join app.products p on p.id=b.product_id
-            where p.code='imds-marketing'
-            order by o.name;"
-
-          echo 'CONTROL_COMMANDS'
-          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --field-separator='|' --command="
-            select c.status,count(*)
-            from app.control_commands c
-            join app.products p on p.id=c.product_id
-            where p.code='imds-marketing'
-            group by c.status
-            order by c.status;"
+          API=http://127.0.0.1:8788
+          TOKEN="$(openssl rand -hex 32)"
+          TOKEN_HASH="$(printf '%s' "$TOKEN" | sha256sum | awk '{print $1}')"
+          ADMIN_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end, created_at limit 1")"
+          test -n "$ADMIN_ID"
+          sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 --command="insert into app.auth_sessions(user_id,token_hash,expires_at) values ('$ADMIN_ID'::uuid,'$TOKEN_HASH',now()+interval '10 minutes')" >/dev/null
+          cleanup() {
+            sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$TOKEN_HASH'" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for route in /api/auth/me /api/v1/overview /api/v1/control-commands; do
+            curl -fsS --max-time 15 -H "Cookie: imdssa_session=$TOKEN" "$API$route" >/dev/null
+          done
           REMOTE
+      - name: Verify local Marketing control channel
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo bash -c '
+            set -euo pipefail
+            source /etc/imds-platform-control.env
+            test -n \"\$IMDS_PLATFORM_CONTROL_TOKEN\"
+            curl -fsS --max-time 10 -H \"Authorization: Bearer \$IMDS_PLATFORM_CONTROL_TOKEN\" http://127.0.0.1:8787/internal/platform/info | grep -q '\"product\":\"imds-marketing\"'
+            curl -fsS --max-time 10 -H \"Authorization: Bearer \$IMDS_PLATFORM_CONTROL_TOKEN\" http://127.0.0.1:8787/internal/platform/tenants | grep -q '\"items\"'
+            systemctl is-active --quiet imdssa-reconcile.timer
+            systemctl is-active --quiet imdssa-product-monitor.timer
+          '"
       - name: Verify public endpoint
         run: |
           curl -fsS --max-time 20 "http://$VPS_HOST:8080/healthz"

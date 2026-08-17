@@ -127,7 +127,13 @@ install -m 0644 "$STAGE_DIR/reconcile.timer" /etc/systemd/system/imdssa-reconcil
 
 nginx -t
 systemctl daemon-reload
-systemctl enable --now imds-super-admin-api.service
+
+# enable --now does not restart an already-running service after its JavaScript
+# bundle changes. Always restart the API so the process and the deployed files
+# are the same release.
+systemctl enable imds-super-admin-api.service
+systemctl restart imds-super-admin-api.service
+
 systemctl enable --now imdssa-product-monitor.timer
 systemctl enable --now imdssa-reconcile.timer
 systemctl start imdssa-product-monitor.service || true
@@ -138,6 +144,12 @@ if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; the
   ufw allow 8080/tcp >/dev/null
 fi
 
+for _ in $(seq 1 30); do
+  if curl --fail --silent --show-error http://127.0.0.1:8788/healthz >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
 curl --fail --silent --show-error http://127.0.0.1:8788/healthz >/dev/null
 curl --fail --silent --show-error http://127.0.0.1:8080/healthz >/dev/null
 systemctl is-active --quiet imds-super-admin-api.service
