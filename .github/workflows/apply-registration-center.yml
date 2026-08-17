@@ -42,7 +42,7 @@ jobs:
           set -euo pipefail
           git config user.name 'IMDS Automation'
           git config user.email 'automation@imds.local'
-          git add apps/vps-api/src/index.ts apps/vps-api/src/registrationNotifications.ts src/vps/VpsApp.tsx deploy/vps/deploy-control-plane.sh .github/workflows/deploy-vps-control-plane.yml
+          git add apps/vps-api/src/index.ts apps/vps-api/src/registrationNotifications.ts src/vps/VpsApp.tsx deploy/vps/deploy-control-plane.sh
           git diff --cached --check
           if git diff --cached --quiet; then
             echo 'No generated changes to commit'
