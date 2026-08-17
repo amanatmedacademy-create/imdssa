@@ -16,9 +16,10 @@ jobs:
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_USER: ${{ secrets.VPS_USER }}
       VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - name: Validate VPS access
-        run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
+        run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD" && test -n "$EXPECTED_SHA"'
       - name: Install SSH client
         run: sudo apt-get update && sudo apt-get install -y sshpass
       - name: Wait for matching feature release
@@ -30,13 +31,13 @@ jobs:
           SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
           for _ in $(seq 1 120); do
             deployed="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "basename \"\$(readlink -f /var/www/imds-super-admin/current)\"" 2>/dev/null || true)"
-            if [ "$deployed" = "$GITHUB_SHA" ]; then
+            if [ "$deployed" = "$EXPECTED_SHA" ]; then
               echo "release=$deployed"
               exit 0
             fi
             sleep 5
           done
-          echo "Feature release $GITHUB_SHA was not deployed in time" >&2
+          echo "Feature release $EXPECTED_SHA was not deployed in time" >&2
           exit 1
       - name: Verify tenant isolation and RBAC
         env:
@@ -64,24 +65,22 @@ jobs:
           psqlq() { sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --quiet --set=ON_ERROR_STOP=1 --command="$1"; }
           cleanup() {
             set +e
-            if [ -n "${USER_A_ID:-}" ] || [ -n "${USER_B_ID:-}" ] || [ -n "${USER_C_ID:-}" ]; then
-              sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 >/dev/null 2>&1 <<SQL
+            sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 >/dev/null 2>&1 <<SQL
           SET session_replication_role=replica;
-          DELETE FROM app.auth_sessions WHERE user_id IN (NULLIF('${USER_A_ID:-}','')::uuid,NULLIF('${USER_B_ID:-}','')::uuid,NULLIF('${USER_C_ID:-}','')::uuid) OR token_hash IN ('${ADMIN_TOKEN_HASH:-}');
+          DELETE FROM app.auth_sessions WHERE user_id IN (SELECT id FROM app.platform_users WHERE email IN ('$EMAIL_A','$EMAIL_B','$EMAIL_C')) OR token_hash='${ADMIN_TOKEN_HASH:-}';
           DELETE FROM app.realtime_events WHERE payload->>'e2e'='$TEST_ID';
-          DELETE FROM app.module_installations WHERE organization_id IN (NULLIF('${ORG_A_ID:-}','')::uuid,NULLIF('${ORG_B_ID:-}','')::uuid);
-          DELETE FROM app.organization_products WHERE organization_id IN (NULLIF('${ORG_A_ID:-}','')::uuid,NULLIF('${ORG_B_ID:-}','')::uuid);
-          DELETE FROM app.product_tenant_bindings WHERE organization_id IN (NULLIF('${ORG_A_ID:-}','')::uuid,NULLIF('${ORG_B_ID:-}','')::uuid);
-          DELETE FROM app.control_commands WHERE organization_id IN (NULLIF('${ORG_A_ID:-}','')::uuid,NULLIF('${ORG_B_ID:-}','')::uuid);
-          DELETE FROM app.outbox_events WHERE payload->>'organizationId' IN ('${ORG_A_ID:-}','${ORG_B_ID:-}');
-          DELETE FROM app.organization_memberships WHERE user_id IN (NULLIF('${USER_A_ID:-}','')::uuid,NULLIF('${USER_B_ID:-}','')::uuid,NULLIF('${USER_C_ID:-}','')::uuid);
-          DELETE FROM app.platform_users WHERE id IN (NULLIF('${USER_A_ID:-}','')::uuid,NULLIF('${USER_B_ID:-}','')::uuid,NULLIF('${USER_C_ID:-}','')::uuid);
+          DELETE FROM app.module_installations WHERE organization_id IN (SELECT id FROM app.organizations WHERE name IN ('$ORG_A_NAME','$ORG_B_NAME'));
+          DELETE FROM app.organization_products WHERE organization_id IN (SELECT id FROM app.organizations WHERE name IN ('$ORG_A_NAME','$ORG_B_NAME'));
+          DELETE FROM app.product_tenant_bindings WHERE organization_id IN (SELECT id FROM app.organizations WHERE name IN ('$ORG_A_NAME','$ORG_B_NAME'));
+          DELETE FROM app.control_commands WHERE organization_id IN (SELECT id FROM app.organizations WHERE name IN ('$ORG_A_NAME','$ORG_B_NAME'));
+          DELETE FROM app.outbox_events WHERE payload->>'organizationId' IN (SELECT id::text FROM app.organizations WHERE name IN ('$ORG_A_NAME','$ORG_B_NAME'));
+          DELETE FROM app.organization_memberships WHERE user_id IN (SELECT id FROM app.platform_users WHERE email IN ('$EMAIL_A','$EMAIL_B','$EMAIL_C'));
+          DELETE FROM app.platform_users WHERE email IN ('$EMAIL_A','$EMAIL_B','$EMAIL_C');
           DELETE FROM app.modules WHERE code IN ('$MOD_A_CODE','$MOD_B_CODE');
           DELETE FROM app.products WHERE code IN ('$PROD_A_CODE','$PROD_B_CODE');
-          DELETE FROM app.organizations WHERE id IN (NULLIF('${ORG_A_ID:-}','')::uuid,NULLIF('${ORG_B_ID:-}','')::uuid);
+          DELETE FROM app.organizations WHERE name IN ('$ORG_A_NAME','$ORG_B_NAME');
           SET session_replication_role=origin;
           SQL
-            fi
             rm -rf "$TMP_DIR"
           }
           trap cleanup EXIT
@@ -124,7 +123,6 @@ jobs:
           test "$code" = 403
           grep -q 'TENANT_SCOPE_REQUIRED' "$TMP_DIR/global-a.json"
 
-          for who in a b c; do :; done
           curl -fsS -H "Cookie: imdssa_session=$TOKEN_A" "$API/api/tenant/v1/organizations" -o "$TMP_DIR/org-a.json"
           curl -fsS -H "Cookie: imdssa_session=$TOKEN_B" "$API/api/tenant/v1/organizations" -o "$TMP_DIR/org-b.json"
           curl -fsS -H "Cookie: imdssa_session=$TOKEN_C" "$API/api/tenant/v1/organizations" -o "$TMP_DIR/org-c.json"
