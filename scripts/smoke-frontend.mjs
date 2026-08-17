@@ -60,6 +60,25 @@ function collectAssets(html) {
   return [...assets];
 }
 
+async function stopPreview(child) {
+  if (child.exitCode !== null) return;
+  child.kill('SIGTERM');
+  await Promise.race([
+    new Promise((resolve) => child.once('exit', resolve)),
+    new Promise((resolve) => setTimeout(resolve, 1500)),
+  ]);
+  if (child.exitCode === null) {
+    child.kill('SIGKILL');
+    await Promise.race([
+      new Promise((resolve) => child.once('exit', resolve)),
+      new Promise((resolve) => setTimeout(resolve, 1000)),
+    ]);
+  }
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+  child.unref();
+}
+
 const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const child = spawn(command, ['vite', 'preview', '--host', host, '--port', String(port), '--strictPort'], {
   env: { ...process.env, VITE_APP_ENV: 'demo' },
@@ -75,7 +94,7 @@ try {
 
   let rootHtml = '';
   for (const route of routes) {
-    const response = await fetch(`${baseUrl}${route}`, { redirect: 'manual' });
+    const response = await fetch(`${baseUrl}${route}`, { redirect: 'manual', signal: AbortSignal.timeout(3000) });
     const body = await response.text();
     const contentType = response.headers.get('content-type') ?? '';
 
@@ -96,7 +115,7 @@ try {
 
   let combinedCss = '';
   for (const asset of assets) {
-    const response = await fetch(`${baseUrl}${asset}`);
+    const response = await fetch(`${baseUrl}${asset}`, { signal: AbortSignal.timeout(3000) });
     const body = await response.text();
     const contentType = response.headers.get('content-type') ?? '';
 
@@ -122,10 +141,5 @@ try {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
 } finally {
-  child.kill('SIGTERM');
-  await new Promise((resolve) => {
-    if (child.exitCode !== null) return resolve();
-    child.once('exit', resolve);
-    setTimeout(resolve, 2000);
-  });
+  await stopPreview(child);
 }
