@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
 
@@ -17,6 +18,33 @@ export async function handleBillingReconciliationApi(args: { req: IncomingMessag
   const { req,res,pool,url,method,user,json } = args;
   if (!url.pathname.startsWith('/api/v1/billing/')) return false;
   if (!canManage(user)) return false;
+
+  if (url.pathname === '/api/v1/billing/payments' && method === 'POST') {
+    const data = await body(req);
+    const invoiceId = text(data.invoiceId);
+    const methodName = text(data.method) || 'manual';
+    const amountKzt = number(data.amountKzt);
+    const allowed = new Set(['bank_transfer','kaspi','card','cash','manual','other']);
+    if (!invoiceId || amountKzt == null || amountKzt <= 0 || !allowed.has(methodName)) {
+      json(res,400,{error:'INVOICE_AMOUNT_AND_VALID_METHOD_REQUIRED'}); return true;
+    }
+    const externalReference = text(data.externalReference) || `control-center:${randomUUID()}`;
+    const receivedAtRaw = text(data.receivedAt);
+    const receivedAt = receivedAtRaw && Number.isFinite(Date.parse(receivedAtRaw)) ? new Date(receivedAtRaw).toISOString() : new Date().toISOString();
+    try {
+      const result = await pool.query(`select app.record_verified_billing_payment($1::uuid,$2,$3::numeric,$4,$5,$6::timestamptz,$7::jsonb) result`, [
+        invoiceId,methodName,amountKzt,externalReference,text(data.payerName)||null,receivedAt,
+        JSON.stringify({source:'control_center_manual_confirmation',actorUserId:user.id}),
+      ]);
+      const payment = result.rows[0]?.result;
+      if (payment?.paymentId) await pool.query(`update app.billing_payments set recorded_by=$2 where id=$1::uuid and recorded_by is null`, [text(payment.paymentId),user.id]);
+      await pool.query(`insert into app.audit_logs(actor_user_id,action,target_type,target_id,after_state)
+        values($1,'billing.payment.confirmed','billing_payment',$2,$3::jsonb)`, [user.id,text(payment?.paymentId),JSON.stringify(payment || {})]);
+      json(res,201,payment); return true;
+    } catch (error) {
+      json(res,409,{error:error instanceof Error ? error.message : String(error)}); return true;
+    }
+  }
 
   if (url.pathname === '/api/v1/billing/refunds' && method === 'GET') {
     const organizationId = text(url.searchParams.get('organizationId'));
