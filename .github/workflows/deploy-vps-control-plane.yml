@@ -53,6 +53,8 @@ jobs:
           cp deploy/vps/migrations/011_product_commercial_model.sql .deploy-stage/011_product_commercial_model.sql
           cp deploy/vps/migrations/012_organization_product_subscriptions.sql .deploy-stage/012_organization_product_subscriptions.sql
           cp deploy/vps/migrations/014_billing_invoices_payments.sql .deploy-stage/014_billing_invoices_payments.sql
+          cp deploy/vps/migrations/015_subscription_lifecycle.sql .deploy-stage/015_subscription_lifecycle.sql
+          cp deploy/vps/migrations/016_paid_invoice_plan_application.sql .deploy-stage/016_paid_invoice_plan_application.sql
           cp deploy/vps/nginx-super-admin.conf .deploy-stage/nginx.conf
           cp deploy/vps/deploy-control-plane.sh .deploy-stage/deploy-control-plane.sh
           cp deploy/vps/product-monitor.sh .deploy-stage/product-monitor.sh
@@ -60,6 +62,8 @@ jobs:
           cp deploy/vps/imdssa-product-monitor.timer .deploy-stage/product-monitor.timer
           cp deploy/vps/imdssa-reconcile.service .deploy-stage/reconcile.service
           cp deploy/vps/imdssa-reconcile.timer .deploy-stage/reconcile.timer
+          cp deploy/vps/imdssa-subscription-lifecycle.service .deploy-stage/subscription-lifecycle.service
+          cp deploy/vps/imdssa-subscription-lifecycle.timer .deploy-stage/subscription-lifecycle.timer
       - name: Upload and deploy
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
@@ -91,6 +95,7 @@ jobs:
           for route in /api/auth/me /api/v1/overview /api/v1/control-commands /api/v1/notifications /api/v1/settings/notifications/telegram /api/v1/access/users /api/v1/subscriptions /api/v1/billing/overview /api/v1/billing/invoices /api/v1/billing/payments "/api/v1/products/$PRODUCT_ID/commercial"; do
             curl -fsS --max-time 15 -H "Cookie: imdssa_session=$TOKEN" "$API$route" >/dev/null
           done
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regprocedure('app.refresh_subscription_lifecycle()') is not null and to_regprocedure('app.apply_paid_invoice_pending_plan(uuid)') is not null" | grep -q '^t$'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.organization_memberships') is not null" | grep -q '^t$'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.product_limit_catalog') is not null and to_regclass('app.product_module_prices') is not null and to_regclass('app.product_module_dependencies') is not null and to_regclass('app.product_plan_revisions') is not null" | grep -q '^t$'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.product_subscriptions') is not null and to_regclass('app.product_subscription_items') is not null and to_regclass('app.product_subscription_events') is not null" | grep -q '^t$'
@@ -98,6 +103,7 @@ jobs:
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select not exists(select 1 from app.organization_products op left join app.product_subscriptions s on s.organization_id=op.organization_id and s.product_id=op.product_id where s.id is null)" | grep -q '^t$'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select exists(select 1 from app.modules where code='marketing.ai' and status='published')" | grep -q '^t$'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select commercial_role from app.product_module_commercial c join app.modules m on m.id=c.module_id where m.code='marketing.voice-transcription'" | grep -q '^feature$'
+          systemctl is-active --quiet imdssa-subscription-lifecycle.timer
           REMOTE
       - name: Verify local Marketing control channel
         shell: bash
@@ -111,21 +117,29 @@ jobs:
           set -euo pipefail
           source /etc/imds-platform-control.env
           test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
-          cleanup() { rm -f /tmp/imds-platform-info.json /tmp/imds-platform-tenants.json; }
+          cleanup() { rm -f /tmp/imds-platform-info.json /tmp/imds-platform-tenants.json /tmp/imds-billing-center.json; }
           trap cleanup EXIT
           curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info -o /tmp/imds-platform-info.json
           curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/tenants -o /tmp/imds-platform-tenants.json
+          ORGANIZATION_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select s.organization_id from app.product_subscriptions s join app.products p on p.id=s.product_id where p.code='imds-marketing' order by s.created_at limit 1")"
+          if [ -n "$ORGANIZATION_ID" ]; then
+            curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" "http://127.0.0.1:8788/v1/billing/center?organizationId=$ORGANIZATION_ID" -o /tmp/imds-billing-center.json
+          fi
           python3 - <<'PY'
-          import json
+          import json, os
           with open('/tmp/imds-platform-info.json', encoding='utf-8') as stream: info=json.load(stream)
           with open('/tmp/imds-platform-tenants.json', encoding='utf-8') as stream: tenants=json.load(stream)
           if info.get('product') != 'imds-marketing': raise SystemExit(f"Unexpected product response: {info!r}")
           if not isinstance(tenants.get('items'), list): raise SystemExit(f"Unexpected tenants response: {tenants!r}")
+          if os.path.exists('/tmp/imds-billing-center.json'):
+              with open('/tmp/imds-billing-center.json', encoding='utf-8') as stream: billing=json.load(stream)
+              if billing.get('managed') is not True: raise SystemExit(f"Unexpected billing response: {billing!r}")
           print(f"marketing_product={info['product']}")
           print(f"marketing_tenants={len(tenants['items'])}")
           PY
           test "$(systemctl is-active imdssa-reconcile.timer)" = active
           test "$(systemctl is-active imdssa-product-monitor.timer)" = active
+          test "$(systemctl is-active imdssa-subscription-lifecycle.timer)" = active
           REMOTE
       - name: Verify public endpoint
         run: |
