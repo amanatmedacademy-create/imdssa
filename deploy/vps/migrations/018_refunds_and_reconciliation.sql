@@ -146,9 +146,11 @@ BEGIN
       current_coverage := sub.current_period_end IS NULL OR inv.period_end IS NULL OR inv.period_end >= sub.current_period_end - interval '1 second';
 
       IF current_coverage AND NOT later_paid THEN
-        SELECT coalesce(s.past_due_days,1),coalesce(s.grace_days,3),coalesce(s.read_only_days,3)
-        INTO past_due_days,grace_days,read_only_days
-        FROM app.product_commercial_settings s WHERE s.product_id=sub.product_id;
+        SELECT
+          coalesce((select s.past_due_days from app.product_commercial_settings s where s.product_id=sub.product_id),1),
+          coalesce((select s.grace_days from app.product_commercial_settings s where s.product_id=sub.product_id),3),
+          coalesce((select s.read_only_days from app.product_commercial_settings s where s.product_id=sub.product_id),3)
+        INTO past_due_days,grace_days,read_only_days;
         next_grace := now()+make_interval(days=>past_due_days+grace_days);
         next_access := now()+make_interval(days=>past_due_days+grace_days+read_only_days);
 
@@ -212,6 +214,7 @@ DECLARE
   payment app.billing_payments%ROWTYPE;
   target_invoice_id uuid;
   allocation_amount numeric(14,2);
+  allocation_count integer;
   already_refunded numeric(14,2);
   total_refunded numeric(14,2);
   refund_id uuid;
@@ -239,9 +242,10 @@ BEGIN
     FROM app.billing_payment_allocations a WHERE a.payment_id=payment.id AND a.invoice_id=p_invoice_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'PAYMENT_INVOICE_ALLOCATION_NOT_FOUND'; END IF;
   ELSE
-    SELECT count(*),min(a.invoice_id),sum(a.amount_kzt) INTO STRICT already_refunded,target_invoice_id,allocation_amount
-    FROM app.billing_payment_allocations a WHERE a.payment_id=payment.id;
-    IF already_refunded<>1 THEN RAISE EXCEPTION 'REFUND_INVOICE_REQUIRED_FOR_MULTI_ALLOCATION_PAYMENT'; END IF;
+    SELECT count(*)::int INTO allocation_count FROM app.billing_payment_allocations a WHERE a.payment_id=payment.id;
+    IF allocation_count<>1 THEN RAISE EXCEPTION 'REFUND_INVOICE_REQUIRED_FOR_MULTI_ALLOCATION_PAYMENT'; END IF;
+    SELECT a.invoice_id,a.amount_kzt INTO target_invoice_id,allocation_amount
+    FROM app.billing_payment_allocations a WHERE a.payment_id=payment.id LIMIT 1 FOR UPDATE;
   END IF;
 
   SELECT coalesce(sum(r.amount_kzt),0) INTO already_refunded
@@ -341,7 +345,7 @@ BEGIN
     SELECT DISTINCT a.invoice_id
     FROM app.billing_payment_allocations a
     UNION
-    SELECT id FROM app.billing_invoices WHERE status IN ('issued','partially_paid','paid','overdue')
+    SELECT id AS invoice_id FROM app.billing_invoices WHERE status IN ('issued','partially_paid','paid','overdue')
   LOOP
     PERFORM app.recalculate_billing_invoice(item.invoice_id);
     recalculated_invoices := recalculated_invoices+1;
