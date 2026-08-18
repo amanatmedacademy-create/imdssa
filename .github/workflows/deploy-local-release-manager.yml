@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: deploy-local-release-manager
@@ -95,5 +96,35 @@ jobs:
           systemctl is-active --quiet imds-release-manager.service
           test -x /opt/imds-super-admin/local-release-runner.sh
           test -x /opt/imds-super-admin/snapshot-control-plane.sh
-          find /opt/imds-super-admin/release-bundles -mindepth 1 -maxdepth 1 -type d -name 'recovery-*' | grep -q .
+          RECOVERY="$(find /opt/imds-super-admin/release-bundles -mindepth 1 -maxdepth 1 -type d -name 'recovery-*' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
+          test -n "$RECOVERY"
+          test -f "$RECOVERY/stage/web/index.html"
+          test -f "$RECOVERY/stage/api/dist/index.js"
+          test -s "$RECOVERY/database/imdssa.dump"
+          test -s "$RECOVERY/database/SHA256SUMS"
+          cd "$RECOVERY/database"
+          sha256sum -c SHA256SUMS
+          test "$(find /opt/imds-super-admin/release-bundles -mindepth 1 -maxdepth 1 -type d -name 'recovery-*' | wc -l)" -le 10
           REMOTE
+
+      - name: Publish recovery readiness
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+          RELEASE_REF: ${{ steps.release.outputs.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          state=failure
+          description='Local release recovery verification failed'
+          if [ "$JOB_STATUS" = success ]; then
+            state=success
+            description='Local release recovery verified on VPS'
+          fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$RELEASE_REF" \
+            -d "{\"state\":\"$state\",\"context\":\"imdssa/local-recovery\",\"description\":\"$description\"}"
