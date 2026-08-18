@@ -1,0 +1,46 @@
+name: Probe Reconciliation Runtime
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  statuses: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Probe VPS
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          post() {
+            local context="$1" state="$2" description="$3"
+            description=$(printf '%s' "$description" | tr '\n' ' ' | cut -c1-130)
+            curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+              -d "$(jq -nc --arg s "$state" --arg c "$context" --arg d "$description" '{state:$s,context:$c,description:$d}')" >/dev/null
+          }
+
+          db=$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command=\"select to_regprocedure('app.reconcile_billing_state(text)') is not null;\"" 2>&1 || true)
+          if printf '%s' "$db" | grep -q '^t$'; then post imdssa/probe-db success 'reconciliation function exists'; else post imdssa/probe-db failure "$db"; fi
+
+          timer=$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "systemctl is-active imdssa-billing-reconciliation.timer 2>&1" || true)
+          if [ "$timer" = active ]; then post imdssa/probe-timer success 'reconciliation timer active'; else post imdssa/probe-timer failure "$timer"; fi
+
+          service=$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo systemctl start imdssa-billing-reconciliation.service >/tmp/imdssa-probe.out 2>&1; rc=\$?; if [ \$rc -eq 0 ]; then echo SERVICE_OK; else journalctl -u imdssa-billing-reconciliation.service -n 5 --no-pager | tail -n 2; fi" 2>&1 || true)
+          if printf '%s' "$service" | grep -q SERVICE_OK; then post imdssa/probe-service success 'reconciliation service executes'; else post imdssa/probe-service failure "$service"; fi
+
+          fn=$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 --tuples-only --no-align --command=\"select app.reconcile_billing_state(null);\"" 2>&1 || true)
+          if printf '%s' "$fn" | grep -qi completed; then post imdssa/probe-function success 'reconciliation function completes as postgres'; else post imdssa/probe-function failure "$fn"; fi
