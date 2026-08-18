@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
 import { hashPassword, validatePassword } from './security.js';
@@ -17,13 +17,25 @@ type Context = {
   user: PlatformUser;
   scope: TenantAccessScope;
   json: JsonResponder;
-  audit: (req: IncomingMessage, userId: string, action: string, targetType: string, targetId: string | null, beforeState: unknown, afterState: unknown) => Promise<void>;
 };
 
 async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown> : {};
+}
+
+function sourceIp(req: IncomingMessage): string | null {
+  const value = req.headers['x-real-ip'];
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  const remote = req.socket.remoteAddress || '';
+  return remote.startsWith('::ffff:') ? remote.slice(7) : remote || null;
+}
+
+async function audit(pool: Pool, req: IncomingMessage, actorUserId: string, action: string, targetId: string, beforeState: unknown, afterState: unknown) {
+  const requestId = typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].trim() ? req.headers['x-request-id'].trim().slice(0, 128) : randomUUID();
+  await pool.query(`insert into app.audit_logs(actor_user_id,action,target_type,target_id,request_id,source_ip,before_state,after_state)
+    values($1,$2,'organization_membership',$3,$4,$5::inet,$6::jsonb,$7::jsonb)`, [actorUserId, action, targetId, requestId, sourceIp(req), beforeState ? JSON.stringify(beforeState) : null, afterState ? JSON.stringify(afterState) : null]);
 }
 
 function isPlatformManager(user: PlatformUser): boolean {
@@ -76,7 +88,7 @@ async function protectLastOwner(pool: Pool, organizationId: string, userId: stri
 }
 
 export async function handleUserAccessApi(context: Context): Promise<boolean> {
-  const { req, res, pool, url, method, user, scope, json, audit } = context;
+  const { req, res, pool, url, method, user, scope, json } = context;
   const platformBase = '/api/v1/access/users';
   const tenantBase = '/api/tenant/v1/access/users';
   const isPlatformPath = url.pathname === platformBase || url.pathname.startsWith(`${platformBase}/`);
@@ -146,7 +158,7 @@ export async function handleUserAccessApi(context: Context): Promise<boolean> {
       await client.query('commit');
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
 
-    await audit(req, user.id, 'organization_membership.upsert', 'organization_membership', `${organizationId}:${userId}`, null, { organizationId, userId, email, role: requestedRole, status, allowedProductCodes, allowedModuleCodes });
+    await audit(pool, req, user.id, 'organization_membership.upsert', `${organizationId}:${userId}`, null, { organizationId, userId, email, role: requestedRole, status, allowedProductCodes, allowedModuleCodes });
     json(res, existing.rowCount ? 200 : 201, { userId, email, temporaryPassword, mustChangePassword: Boolean(temporaryPassword) });
     return true;
   }
@@ -179,7 +191,7 @@ export async function handleUserAccessApi(context: Context): Promise<boolean> {
     await pool.query(`update app.organization_memberships set role=$3::app.organization_role,status=$4::app.membership_status,allowed_product_codes=$5::text[],allowed_module_codes=$6::text[],updated_at=now()
       where organization_id=$1 and user_id=$2`, [organizationId, targetUserId, role, status, allowedProductCodes, allowedModuleCodes]);
     await pool.query('delete from app.auth_sessions where user_id=$1', [targetUserId]);
-    await audit(req, user.id, 'organization_membership.update', 'organization_membership', `${organizationId}:${targetUserId}`, current.rows[0], { role, status, allowedProductCodes, allowedModuleCodes });
+    await audit(pool, req, user.id, 'organization_membership.update', `${organizationId}:${targetUserId}`, current.rows[0], { role, status, allowedProductCodes, allowedModuleCodes });
     json(res, 200, { ok: true });
     return true;
   }
