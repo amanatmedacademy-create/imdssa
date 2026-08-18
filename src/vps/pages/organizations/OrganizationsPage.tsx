@@ -41,6 +41,7 @@ type Props = {
   organizationProducts: OrganizationProduct[];
   installations: Installation[];
   canManage: boolean;
+  selectedOrganizationId?: string;
   onChanged: () => Promise<void> | void;
   onNavigate: (tab: ControlCenterTab) => void;
 };
@@ -48,7 +49,7 @@ type Props = {
 const money = (value: unknown) => new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', maximumFractionDigits: 0 }).format(Number(value || 0));
 const date = (value: string | null | undefined) => value ? new Date(value).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
 
-export function OrganizationsPage({ user, organizations, organizationProducts, installations, canManage, onChanged, onNavigate }: Props) {
+export function OrganizationsPage({ user, organizations, organizationProducts, installations, canManage, selectedOrganizationId, onChanged, onNavigate }: Props) {
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
@@ -69,8 +70,12 @@ export function OrganizationsPage({ user, organizations, organizationProducts, i
 
   useEffect(() => {
     if (!organizations.length) { setSelectedId(''); return; }
+    if (selectedOrganizationId && organizations.some((item) => item.id === selectedOrganizationId)) {
+      setSelectedId(selectedOrganizationId);
+      return;
+    }
     if (!organizations.some((item) => item.id === selectedId)) setSelectedId(organizations[0].id);
-  }, [organizations, selectedId]);
+  }, [organizations, selectedId, selectedOrganizationId]);
 
   const selected = organizations.find((item) => item.id === selectedId) ?? null;
   const selectedProducts = organizationProducts.filter((item) => item.organization_id === selectedId);
@@ -92,7 +97,7 @@ export function OrganizationsPage({ user, organizations, organizationProducts, i
       setSubscriptions(subscriptionResult.items);
       setInvoices(invoiceResult.items);
     }).catch((e) => {
-      if (!cancelled) setError(e instanceof Error ? e.message : 'Ошибка загрузки коммерческого состояния');
+      if (!cancelled) setError(e instanceof Error ? e.message : 'Не удалось загрузить финансовые данные организации');
     }).finally(() => { if (!cancelled) setCommercialLoading(false); });
     return () => { cancelled = true; };
   }, [selected?.id, user.scope]);
@@ -106,7 +111,7 @@ export function OrganizationsPage({ user, organizations, organizationProducts, i
   const mutate = async (operation: () => Promise<unknown>) => {
     setBusy(true); setError('');
     try { await operation(); await onChanged(); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Ошибка сохранения'); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Не удалось сохранить изменения'); }
     finally { setBusy(false); }
   };
 
@@ -142,7 +147,7 @@ export function OrganizationsPage({ user, organizations, organizationProducts, i
       <article><span>Организации</span><strong>{organizations.length}</strong><small>в Control Center</small></article>
       <article><span>Активные</span><strong>{activeOrganizations}</strong><small>с доступом</small></article>
       <article><span>Приостановлены</span><strong>{suspendedOrganizations}</strong><small>без активного статуса</small></article>
-      <article className={syncIssues ? 'warn' : ''}><span>Sync issues</span><strong>{syncIssues}</strong><small>{syncIssues ? 'требуют проверки' : 'всё синхронизировано'}</small></article>
+      <article className={syncIssues ? 'warn' : ''}><span>Ошибки синхронизации</span><strong>{syncIssues}</strong><small>{syncIssues ? 'требуют проверки' : 'всё синхронизировано'}</small></article>
     </div>
 
     <div className="org-toolbar">
@@ -150,10 +155,10 @@ export function OrganizationsPage({ user, organizations, organizationProducts, i
       {canManage && <button type="button" onClick={() => setCreateOpen((value) => !value)}><CirclePlus size={16} />Добавить организацию</button>}
     </div>
 
-    {error && <div className="vps-error">API: {error}</div>}
+    {error && <div className="vps-error">{error}</div>}
 
     {createOpen && <form className="org-create" onSubmit={createOrganization}>
-      <div><span>НОВАЯ ОРГАНИЗАЦИЯ</span><h2>Создать клиента</h2><p>Создаётся только реальная запись организации. Продукты и подписки назначаются отдельно.</p></div>
+      <div><span>НОВАЯ ОРГАНИЗАЦИЯ</span><h2>Создать клиента</h2><p>Создаётся карточка организации. Продукты и подписки можно назначить после сохранения.</p></div>
       <label>Название<input required value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} /></label>
       <label>Юр. название<input value={createForm.legalName} onChange={(e) => setCreateForm({ ...createForm, legalName: e.target.value })} /></label>
       <label>БИН<input value={createForm.bin} onChange={(e) => setCreateForm({ ...createForm, bin: e.target.value })} /></label>
@@ -163,7 +168,7 @@ export function OrganizationsPage({ user, organizations, organizationProducts, i
 
     <div className="org-workspace">
       <div className="org-list-panel">
-        <div className="org-panel-head"><div><span>CLIENT REGISTRY</span><h2>Организации</h2></div><small>{filtered.length} записей</small></div>
+        <div className="org-panel-head"><div><span>КЛИЕНТЫ</span><h2>Организации</h2></div><small>{filtered.length} записей</small></div>
         {!filtered.length ? <EmptyState title="Организации не найдены" text="Измените поисковый запрос или создайте новую организацию." /> : <div className="org-list">{filtered.map((item) => {
           const access = organizationProducts.filter((product) => product.organization_id === item.id);
           const hasIssue = access.some((product) => product.sync_status && product.sync_status !== 'synced');
@@ -194,8 +199,8 @@ export function OrganizationsPage({ user, organizations, organizationProducts, i
           </div>
 
           <div className="org-section">
-            <div className="org-section-head"><div><PackageCheck size={16} /><span><strong>Продукты и доступ</strong><small>Desired state и подтверждение runtime</small></span></div><button type="button" onClick={() => onNavigate('products')}>Управлять</button></div>
-            {!selectedProducts.length ? <div className="org-section-empty">Продукты не назначены.</div> : <div className="org-access-list">{selectedProducts.map((item) => <div key={item.product_id}><div><strong>{item.product_name}</strong><span>{item.product_code}</span></div><Status value={item.status} /><div><span>Sync</span><Status value={item.sync_status || 'pending'} /></div><div><span>Revision</span><strong>{item.actual_revision ?? 0} / {item.desired_revision ?? 0}</strong></div></div>)}</div>}
+            <div className="org-section-head"><div><PackageCheck size={16} /><span><strong>Продукты и доступ</strong><small>Назначенные продукты и фактический доступ</small></span></div><button type="button" onClick={() => onNavigate('products')}>Управлять</button></div>
+            {!selectedProducts.length ? <div className="org-section-empty">Продукты не назначены.</div> : <div className="org-access-list">{selectedProducts.map((item) => <div key={item.product_id}><div><strong>{item.product_name}</strong><span>{item.product_code}</span></div><Status value={item.status} /><div><span>Синхронизация</span><Status value={item.sync_status || 'pending'} /></div><div><span>Версия настроек</span><strong>{item.actual_revision ?? 0} / {item.desired_revision ?? 0}</strong></div></div>)}</div>}
           </div>
 
           <div className="org-section">
@@ -205,7 +210,7 @@ export function OrganizationsPage({ user, organizations, organizationProducts, i
 
           {user.scope === 'platform' && <div className="org-commercial-grid">
             <div className="org-section">
-              <div className="org-section-head"><div><PackageCheck size={16} /><span><strong>Подписки</strong><small>Тарифы и lifecycle</small></span></div><button type="button" onClick={() => onNavigate('subscriptions')}>Открыть</button></div>
+              <div className="org-section-head"><div><PackageCheck size={16} /><span><strong>Подписки</strong><small>Тарифы и срок доступа</small></span></div><button type="button" onClick={() => onNavigate('subscriptions')}>Открыть</button></div>
               {commercialLoading ? <div className="org-section-empty">Загрузка…</div> : !subscriptions.length ? <div className="org-section-empty">Подписок пока нет.</div> : <div className="org-subscription-list">{subscriptions.map((item) => <div key={item.id}><div><strong>{item.product_name}</strong><span>{item.plan_name || 'Без тарифа'} · {item.billing_period_months} мес.</span></div><Status value={item.status} /><small>Доступ до {date(item.access_ends_at || item.current_period_end || item.trial_ends_at)}</small></div>)}</div>}
             </div>
 
