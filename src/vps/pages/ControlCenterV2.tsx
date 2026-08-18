@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { OverviewPage } from './overview/OverviewPage';
 import { OrganizationsPage } from './organizations/OrganizationsPage';
+import { RegistrationsPage } from './registrations/RegistrationsPage';
 import { ProductsPage } from './products/ProductsPage';
 import { ModulesPage } from './modules/ModulesPage';
 import { SubscriptionsPage } from './subscriptions/SubscriptionsPage';
@@ -49,12 +50,11 @@ const administrationNavigation: NavigationItem[] = [
   { id: 'settings', label: 'Настройки', description: 'Уведомления и defaults', icon: Settings2 },
 ];
 
-const moduleSpecs: Record<Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events' | 'users' | 'security'>, { kicker: string; title: string; text: string; fields: string[] }> = {
-  registrations: { kicker: 'ONBOARDING', title: 'Регистрации', text: 'Входящие регистрации из продуктов до создания или связывания организации.', fields: ['Источник регистрации', 'Компания и владелец', 'Контакты', 'Trial', 'Дата регистрации', 'Статус обработки'] },
+const moduleSpecs: Record<Exclude<ControlCenterTab, 'overview' | 'organizations' | 'registrations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events' | 'users' | 'security'>, { kicker: string; title: string; text: string; fields: string[] }> = {
   settings: { kicker: 'CONTROL CENTER', title: 'Настройки', text: 'Бизнес-настройки Control Center без серверных secrets.', fields: ['Telegram уведомления', 'Notification routing', 'Commercial defaults', 'Trial defaults', 'Системные параметры', 'Audit изменений'] },
 };
 
-function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events' | 'users' | 'security'>; onOpenLegacy: () => void }) {
+function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, 'overview' | 'organizations' | 'registrations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events' | 'users' | 'security'>; onOpenLegacy: () => void }) {
   const spec = moduleSpecs[tab];
   return <section className="ccv2-module">
     <div className="ccv2-module-intro"><div><span>{spec.kicker}</span><h2>{spec.title}</h2><p>{spec.text}</p></div><button type="button" onClick={onOpenLegacy}>Открыть текущий рабочий экран</button></div>
@@ -63,10 +63,7 @@ function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, '
   </section>;
 }
 
-const legacyTabIndex: Partial<Record<ControlCenterTab, number>> = {
-  registrations: 2,
-  settings: 9,
-};
+const legacyTabIndex: Partial<Record<ControlCenterTab, number>> = { settings: 9 };
 
 export function ControlCenterV2() {
   const [user, setUser] = useState<User | null>(null);
@@ -156,6 +153,7 @@ export function ControlCenterV2() {
       {error && <div className="vps-error">API: {error}</div>}
       {tab === 'overview' && <OverviewPage overview={overview} organizations={organizations} products={products} installations={installations} commands={commands} realtimeState={realtimeState} onRefresh={() => void refresh()} onNavigate={(target) => setTab(target)} />}
       {tab === 'organizations' && <OrganizationsPage user={user} organizations={organizations} organizationProducts={organizationProducts} installations={installations} canManage={canManage} onChanged={refresh} onNavigate={setTab} />}
+      {tab === 'registrations' && user.scope === 'platform' && <RegistrationsPage organizations={organizations} realtimeTick={realtimeEvents.length} onOpenOrganization={() => setTab('organizations')} />}
       {tab === 'products' && <ProductsPage user={user} products={products} organizationProducts={organizationProducts} installations={installations} canManage={canManage} />}
       {tab === 'modules' && <ModulesPage user={user} modules={modules} products={products} organizations={organizations} installations={installations} canManage={canManage} onChanged={refresh} onNavigateSync={() => setTab('sync')} />}
       {tab === 'subscriptions' && user.scope === 'platform' && <SubscriptionsPage organizations={organizations} products={products} canManage={canManage} />}
@@ -164,7 +162,7 @@ export function ControlCenterV2() {
       {tab === 'events' && <EventsPage user={user} realtimeEvents={realtimeEvents} commands={commands} organizations={organizations} products={products} realtimeState={realtimeState} />}
       {tab === 'users' && <UsersPage user={user} organizations={organizations} products={products} modules={modules} />}
       {tab === 'security' && <SecurityPage user={user} />}
-      {tab !== 'overview' && tab !== 'organizations' && tab !== 'products' && tab !== 'modules' && tab !== 'subscriptions' && tab !== 'billing' && tab !== 'sync' && tab !== 'events' && tab !== 'users' && tab !== 'security' && <ModuleLanding tab={tab} onOpenLegacy={() => openLegacy(tab)} />}
+      {tab !== 'overview' && tab !== 'organizations' && tab !== 'registrations' && tab !== 'products' && tab !== 'modules' && tab !== 'subscriptions' && tab !== 'billing' && tab !== 'sync' && tab !== 'events' && tab !== 'users' && tab !== 'security' && <ModuleLanding tab={tab} onOpenLegacy={() => openLegacy(tab)} />}
     </main>
   </div>;
 }
