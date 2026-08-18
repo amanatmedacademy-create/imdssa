@@ -8,6 +8,18 @@ type Organization = { id: string; name: string; status: string };
 type Product = { id: string; code: string; name: string; status: string; last_health: string; last_heartbeat_at: string | null; last_latency_ms?: number | null; last_error?: string | null; tenants: number };
 type Installation = { id: string; status: string; sync_status: string };
 type ControlCommand = { id: string; command_type: string; status: string; attempts: number; last_error: string | null; organization_name: string; product_name: string; product_code: string; created_at: string };
+type InfrastructureSnapshot = {
+  host: {
+    hostname: string;
+    uptimeSeconds: number;
+    cpuPercent: number;
+    memory: { total: number; used: number; percent: number };
+    disk: { total: number; used: number; percent: number };
+  };
+  database: { database: string; connections: number; active_connections: number };
+  services: Array<{ key: string; label: string; active: string }>;
+  ports: Array<{ exposure: 'public' | 'loopback' | 'private' | 'unknown' }>;
+};
 type RealtimeState = 'connecting' | 'online' | 'offline';
 type Target = 'organizations' | 'products' | 'modules' | 'sync';
 
@@ -26,6 +38,7 @@ export function OverviewPreviewApp() {
   const [products, setProducts] = useState<Product[]>([]);
   const [installations, setInstallations] = useState<Installation[]>([]);
   const [commands, setCommands] = useState<ControlCommand[]>([]);
+  const [infrastructure, setInfrastructure] = useState<InfrastructureSnapshot | null>(null);
   const [realtimeState, setRealtimeState] = useState<RealtimeState>('connecting');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -35,18 +48,23 @@ export function OverviewPreviewApp() {
     const me = await api<{ user: User }>('/api/auth/me');
     setUser(me.user);
     const root = me.user.scope === 'tenant' ? '/api/tenant/v1' : '/api/v1';
-    const [snapshot, organizationList, productList, installationList, commandList] = await Promise.all([
+    const infrastructureRequest = me.user.scope === 'platform'
+      ? api<InfrastructureSnapshot>('/infra-api/overview').catch(() => null)
+      : Promise.resolve(null);
+    const [snapshot, organizationList, productList, installationList, commandList, infrastructureSnapshot] = await Promise.all([
       api<OverviewSnapshot>(`${root}/overview`),
       api<{ items: Organization[] }>(`${root}/organizations`),
       api<{ items: Product[] }>(`${root}/products`),
       api<{ items: Installation[] }>(`${root}/installations`),
       api<{ items: ControlCommand[] }>(`${root}/control-commands`),
+      infrastructureRequest,
     ]);
     setOverview(snapshot);
     setOrganizations(organizationList.items);
     setProducts(productList.items);
     setInstallations(installationList.items);
     setCommands(commandList.items);
+    setInfrastructure(infrastructureSnapshot);
   }, []);
 
   useEffect(() => {
@@ -76,6 +94,6 @@ export function OverviewPreviewApp() {
       <div><a href="/">Вернуться в Control Center</a></div>
     </header>
     {error && <div className="overview-preview-error">{error}</div>}
-    <OverviewPage overview={overview} organizations={organizations} products={products} installations={installations} commands={commands} realtimeState={realtimeState} onRefresh={() => void refresh().catch((e) => setError(e instanceof Error ? e.message : 'Ошибка обновления'))} onNavigate={navigate} />
+    <OverviewPage overview={overview} organizations={organizations} products={products} installations={installations} commands={commands} infrastructure={infrastructure} realtimeState={realtimeState} onRefresh={() => void refresh().catch((e) => setError(e instanceof Error ? e.message : 'Ошибка обновления'))} onNavigate={navigate} />
   </div>;
 }
