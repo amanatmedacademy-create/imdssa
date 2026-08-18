@@ -1,0 +1,91 @@
+name: Deploy Infrastructure Control
+
+on:
+  workflow_run:
+    workflows: ["Deploy VPS Control Plane"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-infrastructure-control
+  cancel-in-progress: true
+
+env:
+  VPS_HOST: ${{ secrets.VPS_HOST }}
+  VPS_USER: ${{ secrets.VPS_USER }}
+  VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve release ref
+        id: release
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "ref=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint --workspace @imds/infra-api
+      - run: npm run build --workspace @imds/infra-api
+      - run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Stage infrastructure API
+        run: |
+          rm -rf .infra-stage
+          mkdir -p .infra-stage
+          cp -a apps/infra-api/dist .infra-stage/dist
+          cp apps/infra-api/package.json .infra-stage/package.json
+          cp deploy/vps/deploy-infrastructure-api.sh .infra-stage/deploy-infrastructure-api.sh
+
+      - name: Upload and deploy
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=20 -o ServerAliveCountMax=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'rm -rf /tmp/imdssa-infra-release && mkdir -p /tmp/imdssa-infra-release'
+          sshpass -e scp "${SSH_ARGS[@]}" -r .infra-stage/. "$VPS_USER@$VPS_HOST:/tmp/imdssa-infra-release/"
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo install -m 0750 /tmp/imdssa-infra-release/deploy-infrastructure-api.sh /opt/imds-super-admin/deploy-infrastructure-api.sh && sudo /opt/imds-super-admin/deploy-infrastructure-api.sh /tmp/imdssa-infra-release"
+
+      - name: Verify authenticated infrastructure endpoints
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          API=http://127.0.0.1:8080
+          TOKEN="$(openssl rand -hex 32)"
+          TOKEN_HASH="$(printf '%s' "$TOKEN" | sha256sum | awk '{print $1}')"
+          ADMIN_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end, created_at limit 1")"
+          test -n "$ADMIN_ID"
+          sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 --command="insert into app.auth_sessions(user_id,token_hash,expires_at) values ('$ADMIN_ID'::uuid,'$TOKEN_HASH',now()+interval '10 minutes')" >/dev/null
+          cleanup() { sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$TOKEN_HASH'" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          for route in /infra-api/overview /infra-api/services /infra-api/variables /infra-api/database /infra-api/deployments /infra-api/domains; do
+            curl -fsS --max-time 20 -H "Cookie: imdssa_session=$TOKEN" "$API$route" >/dev/null
+          done
+          systemctl is-active --quiet imds-infrastructure-api.service
+          REMOTE
