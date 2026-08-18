@@ -52,7 +52,14 @@ cp -a "$STAGE_DIR/web/." "$WEB_ROOT/releases/$RELEASE_SHA/"
 ln -sfn "$WEB_ROOT/releases/$RELEASE_SHA" "$WEB_ROOT/current"
 rm -rf "$API_DIR/dist"; cp -a "$STAGE_DIR/api/dist" "$API_DIR/dist"
 install -m 0644 "$STAGE_DIR/api/package.json" "$API_DIR/package.json"
-chown -R imdssa:imdssa "$API_DIR"; cd "$API_DIR"; npm install --omit=dev --no-audit --no-fund
+if [ -d "$STAGE_DIR/api/node_modules" ]; then
+  rm -rf "$API_DIR/node_modules"
+  cp -a "$STAGE_DIR/api/node_modules" "$API_DIR/node_modules"
+else
+  cd "$API_DIR"
+  npm install --omit=dev --no-audit --no-fund
+fi
+chown -R imdssa:imdssa "$API_DIR"
 
 if [ ! -f "$ENV_DIR/api.env" ]; then cat > "$ENV_DIR/api.env" <<'EOF'
 HOST=127.0.0.1
@@ -116,6 +123,8 @@ install -m 0644 "$STAGE_DIR/subscription-lifecycle.service" /etc/systemd/system/
 install -m 0644 "$STAGE_DIR/subscription-lifecycle.timer" /etc/systemd/system/imdssa-subscription-lifecycle.timer
 install -m 0644 "$STAGE_DIR/billing-reconciliation.service" /etc/systemd/system/imdssa-billing-reconciliation.service
 install -m 0644 "$STAGE_DIR/billing-reconciliation.timer" /etc/systemd/system/imdssa-billing-reconciliation.timer
+if [ -f "$STAGE_DIR/local-release-runner.sh" ]; then install -m 0750 "$STAGE_DIR/local-release-runner.sh" "$APP_DIR/local-release-runner.sh"; fi
+if [ -f "$STAGE_DIR/snapshot-control-plane.sh" ]; then install -m 0750 "$STAGE_DIR/snapshot-control-plane.sh" "$APP_DIR/snapshot-control-plane.sh"; fi
 nginx -t; systemctl daemon-reload
 systemctl enable imds-super-admin-api.service; systemctl restart imds-super-admin-api.service
 systemctl enable --now imdssa-product-monitor.timer; systemctl enable --now imdssa-reconcile.timer; systemctl enable --now imdssa-subscription-lifecycle.timer; systemctl enable --now imdssa-billing-reconciliation.timer
