@@ -1,0 +1,37 @@
+product_commercial_production=failed
+verified_from=4c3e25ccf88ad8dc037ad6f9881d15080925d848
+--- source tail ---
+
+added 100 packages in 16s
+
+> @imds/vps-api@0.1.0 lint
+> tsc --noEmit
+
+
+> @imds/vps-api@0.1.0 build
+> tsc -p tsconfig.json
+
+
+> imds-platform-control-plane@0.4.0 lint
+> tsc --noEmit
+
+
+> imds-platform-control-plane@0.4.0 build
+> npm run validate:env && tsc -b && vite build
+
+
+> imds-platform-control-plane@0.4.0 validate:env
+> node scripts/validate-build-env.mjs
+
+[env] validated environment=production runtime=vps strict=true release=4c3e25ccf88a
+[36mvite v8.2.0 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...✓ 1798 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.45 kB │ gzip:  0.29 kB
+dist/assets/index-3HohImWe.css   21.21 kB │ gzip:  4.88 kB
+dist/assets/index-Dfjcc7wR.js   261.04 kB │ gzip: 76.10 kB
+
+[32m✓ built in 201ms[39m
+--- production tail ---
+release=33c29642640d384e04a951848c6403851916e897
