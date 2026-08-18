@@ -37,6 +37,47 @@ export function UserAccessOverlay() {
   const canManage = useMemo(() => Boolean(user && ((user.scope === 'platform' && ['platform_owner','platform_admin'].includes(user.role)) || (user.scope === 'tenant' && ['owner','admin'].includes(user.role)))), [user]);
 
   useEffect(() => {
+    if (!canManage || mustChangePassword) return;
+    let stopped = false;
+    const onUsersClick = () => setOpen(true);
+    const syncNavigation = () => {
+      if (stopped) return;
+      const nav = document.querySelector<HTMLElement>('.vps-sidebar nav');
+      if (!nav) return;
+      let button = nav.querySelector<HTMLButtonElement>('button[data-user-access-nav="true"]');
+      if (!button) {
+        button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.userAccessNav = 'true';
+        button.textContent = 'Пользователи';
+        button.addEventListener('click', onUsersClick);
+        const organizationButton = [...nav.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.trim() === 'Организации');
+        if (organizationButton?.nextSibling) nav.insertBefore(button, organizationButton.nextSibling);
+        else if (organizationButton) nav.appendChild(button);
+        else nav.prepend(button);
+      }
+      button.classList.toggle('active', open);
+      button.setAttribute('aria-current', open ? 'page' : 'false');
+    };
+    syncNavigation();
+    const observer = new MutationObserver(syncNavigation);
+    observer.observe(document.body, { subtree: true, childList: true });
+    const closeOnNativeNavigation = (event: Event) => {
+      const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('.vps-sidebar nav button') : null;
+      if (target && target.dataset.userAccessNav !== 'true') setOpen(false);
+    };
+    document.addEventListener('click', closeOnNativeNavigation, true);
+    return () => {
+      stopped = true;
+      observer.disconnect();
+      document.removeEventListener('click', closeOnNativeNavigation, true);
+      const button = document.querySelector<HTMLButtonElement>('.vps-sidebar nav button[data-user-access-nav="true"]');
+      button?.removeEventListener('click', onUsersClick);
+      button?.remove();
+    };
+  }, [canManage, mustChangePassword, open]);
+
+  useEffect(() => {
     if (!user || (!open && !mustChangePassword)) return;
     const root = user.scope === 'platform' ? '/api/v1' : '/api/tenant/v1';
     Promise.all([
@@ -68,10 +109,7 @@ export function UserAccessOverlay() {
 
   if (mustChangePassword) return <div className="access-overlay access-overlay-force"><section className="access-dialog access-password-dialog"><span className="access-kicker">SECURITY</span><h2>Смените временный пароль</h2><p>До смены пароля доступ к данным организации заблокирован на сервере.</p>{error && <div className="vps-error">{error}</div>}<form className="access-password-form" onSubmit={changePassword}><label>Текущий пароль<input type="password" value={passwordForm.currentPassword} onChange={(e) => setPasswordForm((v) => ({ ...v, currentPassword: e.target.value }))} required /></label><label>Новый пароль<input type="password" minLength={16} value={passwordForm.newPassword} onChange={(e) => setPasswordForm((v) => ({ ...v, newPassword: e.target.value }))} required /></label><label>Подтверждение<input type="password" minLength={16} value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm((v) => ({ ...v, confirmPassword: e.target.value }))} required /></label><button className="vps-primary" disabled={busy}>Сменить пароль</button></form></section></div>;
 
-  if (!canManage) return null;
+  if (!canManage || !open) return null;
 
-  return <>
-    <button className="access-fab" onClick={() => setOpen(true)}>Пользователи</button>
-    {open && <div className="access-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}><section className="access-dialog"><header className="access-dialog-head"><div><span className="access-kicker">CONTROL CENTER</span><h2>Пользователи и доступ</h2></div><button onClick={() => setOpen(false)}>Закрыть</button></header>{error && <div className="vps-error">{error}</div>}<UserAccessManagement user={user} organizations={organizations} products={products} modules={modules} /></section></div>}
-  </>;
+  return <div className="access-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}><section className="access-dialog"><header className="access-dialog-head"><div><span className="access-kicker">CONTROL CENTER</span><h2>Пользователи и доступ</h2></div><button onClick={() => setOpen(false)}>Закрыть</button></header>{error && <div className="vps-error">{error}</div>}<UserAccessManagement user={user} organizations={organizations} products={products} modules={modules} /></section></div>;
 }
