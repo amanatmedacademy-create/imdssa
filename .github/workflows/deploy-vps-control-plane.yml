@@ -58,6 +58,7 @@ jobs:
           cp deploy/vps/migrations/017_verified_provider_payments.sql .deploy-stage/017_verified_provider_payments.sql
           cp deploy/vps/migrations/018_refunds_and_reconciliation.sql .deploy-stage/018_refunds_and_reconciliation.sql
           cp deploy/vps/migrations/019_refund_aware_payment_engine.sql .deploy-stage/019_refund_aware_payment_engine.sql
+          cp deploy/vps/migrations/020_reconciliation_resilience.sql .deploy-stage/020_reconciliation_resilience.sql
           cp deploy/vps/nginx-super-admin.conf .deploy-stage/nginx.conf
           cp deploy/vps/deploy-control-plane.sh .deploy-stage/deploy-control-plane.sh
           cp deploy/vps/product-monitor.sh .deploy-stage/product-monitor.sh
