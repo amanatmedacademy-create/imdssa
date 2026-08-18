@@ -19,6 +19,17 @@ export async function handleBillingReconciliationApi(args: { req: IncomingMessag
   if (!url.pathname.startsWith('/api/v1/billing/')) return false;
   if (!canManage(user)) return false;
 
+  if (url.pathname === '/api/v1/billing/overview' && method === 'GET') {
+    await pool.query(`update app.billing_invoices set status='overdue',updated_at=now() where status in ('issued','partially_paid') and due_at<now() and paid_total_kzt<total_kzt`);
+    const result = await pool.query(`select
+      (select count(*)::int from app.billing_invoices where status in ('issued','partially_paid','overdue')) open_invoices,
+      (select coalesce(sum(total_kzt-paid_total_kzt),0) from app.billing_invoices where status in ('issued','partially_paid','overdue')) receivables_kzt,
+      (select coalesce(sum(total_kzt-paid_total_kzt),0) from app.billing_invoices where status='overdue') overdue_kzt,
+      (select coalesce(sum(greatest(amount_kzt-refunded_total_kzt,0)),0) from app.billing_payments where status in ('succeeded','partially_refunded','refunded') and received_at>=date_trunc('month',now())) paid_this_month_kzt,
+      (select coalesce(sum(amount_kzt),0) from app.billing_refunds where status='succeeded' and received_at>=date_trunc('month',now())) refunded_this_month_kzt`);
+    json(res,200,result.rows[0]); return true;
+  }
+
   if (url.pathname === '/api/v1/billing/payments' && method === 'POST') {
     const data = await body(req);
     const invoiceId = text(data.invoiceId);
