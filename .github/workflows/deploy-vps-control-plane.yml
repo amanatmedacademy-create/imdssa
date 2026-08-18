@@ -29,7 +29,7 @@ jobs:
         env:
           VITE_RUNTIME: vps
           VITE_APP_ENV: production
-          VITE_APP_VERSION: 0.7.0
+          VITE_APP_VERSION: 0.8.0
           VITE_RELEASE_SHA: ${{ github.sha }}
           IMDS_STRICT_ENV: 'true'
         run: npm run build
@@ -47,7 +47,8 @@ jobs:
           cp deploy/vps/migrations/005_security_hardening.sql .deploy-stage/005_security_hardening.sql
           cp deploy/vps/migrations/006_tenant_rbac.sql .deploy-stage/006_tenant_rbac.sql
           cp deploy/vps/migrations/007_notification_delivery_settings.sql .deploy-stage/007_notification_delivery_settings.sql
-          cp deploy/vps/migrations/008_tenant_user_access.sql .deploy-stage/008_tenant_user_access.sql
+          cp deploy/vps/migrations/008_product_commercial_catalog.sql .deploy-stage/008_product_commercial_catalog.sql
+          cp deploy/vps/migrations/009_tenant_user_access.sql .deploy-stage/009_tenant_user_access.sql
           cp deploy/vps/nginx-super-admin.conf .deploy-stage/nginx.conf
           cp deploy/vps/deploy-control-plane.sh .deploy-stage/deploy-control-plane.sh
           cp deploy/vps/product-monitor.sh .deploy-stage/product-monitor.sh
@@ -87,6 +88,8 @@ jobs:
           for route in /api/auth/me /api/v1/overview /api/v1/control-commands /api/v1/notifications /api/v1/settings/notifications/telegram /api/v1/access/users; do
             curl -fsS --max-time 15 -H "Cookie: imdssa_session=$TOKEN" "$API$route" >/dev/null
           done
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.organization_memberships') is not null" | grep -q '^t$'
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.product_plans') is not null and to_regclass('app.product_module_commercial') is not null" | grep -q '^t$'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select exists(select 1 from information_schema.columns where table_schema='app' and table_name='platform_users' and column_name='must_change_password')" | grep -q '^t$'
           REMOTE
       - name: Verify local Marketing control channel
