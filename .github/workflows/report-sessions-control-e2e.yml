@@ -1,0 +1,26 @@
+name: Report Sessions Control E2E
+
+on:
+  workflow_run:
+    workflows: ['Verify Main Sessions and Control Plane E2E']
+    types: [completed]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report verifier conclusion
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE: '47'
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          gh issue comment "$ISSUE" --repo "$REPO" --body "verifier_result=$CONCLUSION\nrun_id=$RUN_ID\nhead_sha=$HEAD_SHA"
