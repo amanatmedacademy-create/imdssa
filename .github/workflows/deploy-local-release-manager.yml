@@ -1,0 +1,99 @@
+name: Deploy Local Release Manager
+
+on:
+  workflow_run:
+    workflows: ["Deploy VPS Control Plane"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-local-release-manager
+  cancel-in-progress: true
+
+env:
+  VPS_HOST: ${{ secrets.VPS_HOST }}
+  VPS_USER: ${{ secrets.VPS_USER }}
+  VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Resolve release ref
+        id: release
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "ref=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint --workspace @imds/release-manager
+      - run: npm run build --workspace @imds/release-manager
+      - run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Stage release manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .release-manager-stage
+          mkdir -p .release-manager-stage
+          cp -a apps/release-manager/dist .release-manager-stage/dist
+          cp apps/release-manager/package.json .release-manager-stage/package.json
+          cp deploy/vps/deploy-release-manager.sh .release-manager-stage/deploy-release-manager.sh
+          cp deploy/vps/local-release-runner.sh .release-manager-stage/local-release-runner.sh
+          cp deploy/vps/snapshot-control-plane.sh .release-manager-stage/snapshot-control-plane.sh
+          npm install --omit=dev --no-audit --no-fund --prefix .release-manager-stage
+
+      - name: Upload and deploy
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=20 -o ServerAliveCountMax=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'rm -rf /tmp/imdssa-release-manager && mkdir -p /tmp/imdssa-release-manager'
+          sshpass -e scp "${SSH_ARGS[@]}" -r .release-manager-stage/. "$VPS_USER@$VPS_HOST:/tmp/imdssa-release-manager/"
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo install -m 0750 /tmp/imdssa-release-manager/deploy-release-manager.sh /opt/imds-super-admin/deploy-release-manager.sh && sudo /opt/imds-super-admin/deploy-release-manager.sh /tmp/imdssa-release-manager"
+
+      - name: Seed recovery release
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo /opt/imds-super-admin/snapshot-control-plane.sh"
+
+      - name: Verify local release manager
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          curl -fsS --max-time 20 http://127.0.0.1:8791/release-api/healthz | grep -q 'githubIndependent'
+          curl -fsS --max-time 20 http://127.0.0.1:8080/release-api/healthz | grep -q 'githubIndependent'
+          systemctl is-active --quiet imds-release-manager.service
+          test -x /opt/imds-super-admin/local-release-runner.sh
+          test -x /opt/imds-super-admin/snapshot-control-plane.sh
+          find /opt/imds-super-admin/release-bundles -mindepth 1 -maxdepth 1 -type d -name 'recovery-*' | grep -q .
+          REMOTE
