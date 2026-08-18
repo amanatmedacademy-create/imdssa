@@ -49,17 +49,23 @@ async function resolveInvoice(pool: Pool, input: { invoiceId?: string; invoiceNu
 }
 
 async function recordPayment(pool: Pool, input: {
-  invoiceId: string;
-  method: string;
-  amountKzt: number;
-  externalReference: string;
-  payerName?: string | null;
-  receivedAt?: string | null;
-  metadata?: JsonRecord;
+  invoiceId: string; method: string; amountKzt: number; externalReference: string;
+  payerName?: string | null; receivedAt?: string | null; metadata?: JsonRecord;
 }) {
   const receivedAt = text(input.receivedAt) && Number.isFinite(Date.parse(text(input.receivedAt))) ? new Date(text(input.receivedAt)).toISOString() : new Date().toISOString();
   const result = await pool.query(`select app.record_verified_billing_payment($1::uuid,$2,$3::numeric,$4,$5,$6::timestamptz,$7::jsonb) result`, [
     input.invoiceId,input.method,input.amountKzt,input.externalReference,text(input.payerName)||null,receivedAt,JSON.stringify(input.metadata || {}),
+  ]);
+  return result.rows[0]?.result as JsonRecord | undefined;
+}
+
+async function recordRefund(pool: Pool, input: {
+  provider: string; originalPaymentReference: string; refundReference: string; amountKzt: number;
+  invoiceId?: string | null; receivedAt?: string | null; metadata?: JsonRecord;
+}) {
+  const receivedAt = text(input.receivedAt) && Number.isFinite(Date.parse(text(input.receivedAt))) ? new Date(text(input.receivedAt)).toISOString() : new Date().toISOString();
+  const result = await pool.query(`select app.record_verified_billing_refund($1,$2,$3,$4::numeric,$5::uuid,$6::timestamptz,$7::jsonb) result`, [
+    input.provider,input.originalPaymentReference,input.refundReference,input.amountKzt,input.invoiceId || null,receivedAt,JSON.stringify(input.metadata || {}),
   ]);
   return result.rows[0]?.result as JsonRecord | undefined;
 }
@@ -72,12 +78,26 @@ async function handleVerifiedFeed(req: IncomingMessage,res: ServerResponse,pool:
   const provider = text(payload.provider).toLowerCase();
   const eventReference = text(payload.eventReference || payload.externalReference);
   const status = text(payload.status || 'succeeded').toLowerCase();
-  const methodName = text(payload.method || (provider === 'kaspi' ? 'kaspi' : provider === 'bank' || provider === 'halyk' ? 'bank_transfer' : 'other'));
+  const eventType = text(payload.eventType || 'payment').toLowerCase();
   const amountKzt = number(payload.amountKzt);
   const invoice = await resolveInvoice(pool,{invoiceId:text(payload.invoiceId),invoiceNumber:text(payload.invoiceNumber)});
-  if (!provider || !eventReference || !invoice || amountKzt == null || amountKzt <= 0) { json(res,400,{error:'INVALID_PROVIDER_PAYMENT'}); return true; }
-  if (status !== 'succeeded' && status !== 'paid') { json(res,202,{accepted:true,applied:false,status}); return true; }
+  if (!provider || !eventReference || !invoice || amountKzt == null || amountKzt <= 0) { json(res,400,{error:'INVALID_PROVIDER_EVENT'}); return true; }
+  if (status !== 'succeeded' && status !== 'paid' && status !== 'refunded') { json(res,202,{accepted:true,applied:false,status}); return true; }
   try {
+    if (eventType === 'refund') {
+      const originalReference = text(payload.originalPaymentReference || payload.paymentReference);
+      if (!originalReference) { json(res,400,{error:'ORIGINAL_PAYMENT_REFERENCE_REQUIRED'}); return true; }
+      const result = await recordRefund(pool,{
+        provider,originalPaymentReference:`${provider}:${originalReference}`,refundReference:eventReference,amountKzt,invoiceId:invoice.id,
+        receivedAt:text(payload.receivedAt)||null,metadata:{source:'verified_provider_feed',provider,eventReference,raw:payload.metadata || {}},
+      });
+      await pool.query(`insert into app.billing_provider_events(provider,event_type,event_reference,invoice_id,payment_id,refund_id,payload)
+        values($1,'refund',$2,$3::uuid,nullif($4,'')::uuid,nullif($5,'')::uuid,$6::jsonb)
+        on conflict(provider,event_type,event_reference) do update set payment_id=coalesce(app.billing_provider_events.payment_id,excluded.payment_id),refund_id=coalesce(app.billing_provider_events.refund_id,excluded.refund_id),processed_at=now()`,
+        [provider,eventReference,invoice.id,text(result?.paymentId),text(result?.refundId),JSON.stringify(payload)]);
+      json(res,200,{ok:true,result}); return true;
+    }
+    const methodName = text(payload.method || (provider === 'kaspi' ? 'kaspi' : provider === 'bank' || provider === 'halyk' ? 'bank_transfer' : 'other'));
     const result = await recordPayment(pool,{
       invoiceId:invoice.id,method:methodName,amountKzt,externalReference:`${provider}:${eventReference}`,
       payerName:text(payload.payerName)||null,receivedAt:text(payload.receivedAt)||null,
@@ -85,7 +105,8 @@ async function handleVerifiedFeed(req: IncomingMessage,res: ServerResponse,pool:
     });
     await pool.query(`insert into app.billing_provider_events(provider,event_type,event_reference,invoice_id,payment_id,payload)
       values($1,'payment.succeeded',$2,$3::uuid,nullif($4,'')::uuid,$5::jsonb)
-      on conflict(provider,event_type,event_reference) do nothing`, [provider,eventReference,invoice.id,text(result?.paymentId),JSON.stringify(payload)]);
+      on conflict(provider,event_type,event_reference) do update set payment_id=coalesce(app.billing_provider_events.payment_id,excluded.payment_id),processed_at=now()`,
+      [provider,eventReference,invoice.id,text(result?.paymentId),JSON.stringify(payload)]);
     json(res,200,{ok:true,result}); return true;
   } catch (error) {
     json(res,409,{error:error instanceof Error ? error.message : String(error)}); return true;
@@ -103,8 +124,8 @@ async function handleCloudPayments(req: IncomingMessage,res: ServerResponse,pool
   const invoice = await resolveInvoice(pool,{invoiceId:providerInvoiceId,invoiceNumber:providerInvoiceId});
   if (!invoice) { json(res,200,{code:10}); return true; }
   if (text(params.AccountId) && text(params.AccountId) !== text(invoice.external_key) && text(params.AccountId) !== text(invoice.organization_id)) { json(res,200,{code:10}); return true; }
-  if (params.Amount && Math.abs(Number(params.Amount)-Number(invoice.total_kzt)) > 0.01) { json(res,200,{code:12}); return true; }
   if (params.Currency && text(params.Currency).toUpperCase() !== String(invoice.currency || 'KZT').toUpperCase()) { json(res,200,{code:12}); return true; }
+  if ((event === 'check' || event === 'pay') && params.Amount && Math.abs(Number(params.Amount)-Number(invoice.total_kzt)) > 0.01) { json(res,200,{code:12}); return true; }
   if (event === 'check') { json(res,200,{code:0}); return true; }
   const eventReference = text(params.TransactionId || params.SubscriptionId || params.InvoiceId);
   if (event === 'pay') {
@@ -117,11 +138,27 @@ async function handleCloudPayments(req: IncomingMessage,res: ServerResponse,pool
       });
       await pool.query(`insert into app.billing_provider_events(provider,event_type,event_reference,invoice_id,payment_id,payload)
         values('cloudpayments','pay',$1,$2::uuid,nullif($3,'')::uuid,$4::jsonb)
-        on conflict(provider,event_type,event_reference) do nothing`, [eventReference,invoice.id,text(result?.paymentId),JSON.stringify(params)]);
+        on conflict(provider,event_type,event_reference) do update set payment_id=coalesce(app.billing_provider_events.payment_id,excluded.payment_id),processed_at=now()`,
+        [eventReference,invoice.id,text(result?.paymentId),JSON.stringify(params)]);
       json(res,200,{code:0}); return true;
-    } catch {
-      json(res,200,{code:13}); return true;
-    }
+    } catch { json(res,200,{code:13}); return true; }
+  }
+  if (event === 'refund') {
+    const refundReference = text(params.TransactionId);
+    const originalTransactionId = text(params.PaymentTransactionId);
+    const amount = number(params.Amount);
+    if (!refundReference || !originalTransactionId || amount == null || amount <= 0) { json(res,200,{code:13}); return true; }
+    try {
+      const result = await recordRefund(pool,{
+        provider:'cloudpayments',originalPaymentReference:`cloudpayments:${originalTransactionId}`,refundReference,amountKzt:amount,invoiceId:invoice.id,
+        receivedAt:new Date().toISOString(),metadata:{source:'cloudpayments_refund_webhook',provider:'cloudpayments',transactionId:refundReference,paymentTransactionId:originalTransactionId},
+      });
+      await pool.query(`insert into app.billing_provider_events(provider,event_type,event_reference,invoice_id,payment_id,refund_id,payload)
+        values('cloudpayments','refund',$1,$2::uuid,nullif($3,'')::uuid,nullif($4,'')::uuid,$5::jsonb)
+        on conflict(provider,event_type,event_reference) do update set payment_id=coalesce(app.billing_provider_events.payment_id,excluded.payment_id),refund_id=coalesce(app.billing_provider_events.refund_id,excluded.refund_id),processed_at=now()`,
+        [refundReference,invoice.id,text(result?.paymentId),text(result?.refundId),JSON.stringify(params)]);
+      json(res,200,{code:0}); return true;
+    } catch { json(res,200,{code:13}); return true; }
   }
   await pool.query(`insert into app.billing_provider_events(provider,event_type,event_reference,invoice_id,payload)
     values('cloudpayments',$1,$2,$3::uuid,$4::jsonb) on conflict(provider,event_type,event_reference) do nothing`, [event,eventReference,invoice.id,JSON.stringify(params)]);
