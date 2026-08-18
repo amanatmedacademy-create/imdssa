@@ -44,23 +44,39 @@ jobs:
           SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
           post_status() {
             local context="$1" state="$2" description="$3"
+            description=$(printf '%s' "$description" | tr '\n' ' ' | cut -c1-130)
             curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
               "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
               -d "$(jq -nc --arg s "$state" --arg c "$context" --arg d "$description" '{state:$s,context:$c,description:$d}')" >/dev/null
           }
+
           if sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('"'"'app.billing_refunds'"'"') is not null and to_regclass('"'"'app.billing_reconciliation_runs'"'"') is not null and to_regprocedure('"'"'app.reconcile_billing_state(text)'"'"') is not null and to_regprocedure('"'"'app.record_verified_billing_payment(uuid,text,numeric,text,text,timestamp with time zone,jsonb)'"'"') is not null" | grep -q '^"'"'t$'"'"''; then
             post_status imdssa/diag-db success 'Refund/reconciliation DB objects are applied'
           else post_status imdssa/diag-db failure 'Refund/reconciliation DB objects missing'; fi
 
-          if sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          timer_state=$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'systemctl is-active imdssa-billing-reconciliation.timer 2>&1 || true' | tail -n1)
+          if [ "$timer_state" = active ]; then post_status imdssa/diag-reconciliation-timer success 'Billing reconciliation timer is active'
+          else post_status imdssa/diag-reconciliation-timer failure "timer=$timer_state"; fi
+
+          service_state=$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'systemctl is-failed imdssa-billing-reconciliation.service 2>&1 || true' | tail -n1)
+          if [ "$service_state" = failed ]; then
+            service_error=$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo journalctl -u imdssa-billing-reconciliation.service -n 8 --no-pager 2>&1 | tail -n 2 | tr "\n" " "' || true)
+            post_status imdssa/diag-reconciliation-service failure "$service_error"
+          else post_status imdssa/diag-reconciliation-service success "service=$service_state"; fi
+
+          function_output=$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE' 2>&1 || true
           set -euo pipefail
-          systemctl is-active --quiet imds-super-admin-api.service
-          systemctl is-active --quiet imdssa-billing-reconciliation.timer
           source /etc/imds-super-admin/postgres.env
-          sudo -u imdssa env DATABASE_URL="$DATABASE_URL" /usr/bin/psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 --quiet --command="select app.reconcile_billing_state(null);" >/dev/null
+          sudo -u imdssa env DATABASE_URL="$DATABASE_URL" /usr/bin/psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 --tuples-only --no-align --command="select app.reconcile_billing_state(null);"
           REMOTE
-          then post_status imdssa/diag-reconciliation success 'Reconciliation service/function executes successfully'
-          else post_status imdssa/diag-reconciliation failure 'Reconciliation service/function execution failed'; fi
+          )
+          if printf '%s' "$function_output" | grep -q '"status" : "completed"\|"status": "completed"\|"status":"completed"'; then
+            post_status imdssa/diag-reconciliation-function success 'reconcile_billing_state completed'
+          elif printf '%s' "$function_output" | grep -qi 'runId\|completed'; then
+            post_status imdssa/diag-reconciliation-function success 'reconcile_billing_state completed'
+          else
+            post_status imdssa/diag-reconciliation-function failure "$function_output"
+          fi
 
           if sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
           set -euo pipefail
