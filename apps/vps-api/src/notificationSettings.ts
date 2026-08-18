@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
 import { handleProductCommercialApi } from './productCommercial.js';
 import { handleSessionApi } from './sessionRoutes.js';
+import { handleSubscriptionApi } from './subscriptions.js';
 
 type PlatformUser = { id: string; global_role: string | null };
 
@@ -109,6 +110,7 @@ async function telegramRequest(token: string, method: string, payload: Record<st
 export async function handleNotificationSettingsApi(req: IncomingMessage, res: ServerResponse, pool: Pool, url: URL, method: string, user: PlatformUser): Promise<boolean> {
   if (await handleSessionApi({ req, res, pool, url, method, user, json })) return true;
   if (await handleProductCommercialApi({ req, res, pool, url, method, user, json })) return true;
+  if (await handleSubscriptionApi({ req, res, pool, url, method, user, json })) return true;
 
   const path = '/api/v1/settings/notifications/telegram';
   if (url.pathname !== path && url.pathname !== `${path}/test`) return false;
