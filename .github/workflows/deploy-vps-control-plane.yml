@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  statuses: write
 concurrency:
   group: deploy-vps-control-plane
   cancel-in-progress: true
@@ -128,3 +129,19 @@ jobs:
         run: |
           curl -fsS --max-time 20 "http://$VPS_HOST:8080/healthz"
           curl -fsS --max-time 20 "http://$VPS_HOST:8080/" | grep -qi '<div id="root"'
+      - name: Publish deploy status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          state=failure
+          description='IMDS Control Center VPS deploy failed'
+          if [ "$JOB_STATUS" = success ]; then state=success; description='IMDS Control Center VPS deploy verified'; fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "{\"state\":\"$state\",\"context\":\"imdssa/vps-deploy\",\"description\":\"$description\"}"
