@@ -98,9 +98,14 @@ jobs:
           set -euo pipefail
           source /etc/imds-platform-control.env
           test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
-          curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info >/dev/null
+          INFO="$(curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info)"
+          printf '%s' "$INFO" | grep -q '"protocol":4'
+          printf '%s' "$INFO" | grep -q 'fail-closed-managed-organization-scope'
+          grep -q '^Environment=IMDS_BILLING_CONTROL_URL=http://127.0.0.1:8788$' /etc/systemd/system/imds-marketing.service
+          systemctl is-active --quiet imds-marketing
+          curl -fsS --max-time 10 http://127.0.0.1:8787/api/health >/dev/null
           ORGANIZATION_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select organization_id from app.product_subscriptions order by created_at limit 1")"
           if [ -n "$ORGANIZATION_ID" ]; then curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" "http://127.0.0.1:8788/v1/billing/center?organizationId=$ORGANIZATION_ID" >/dev/null; fi
           REMOTE
-          then post_status imdssa/diag-control-channel success 'Marketing control/billing channel is healthy'
-          else post_status imdssa/diag-control-channel failure 'Marketing control/billing channel failed'; fi
+          then post_status imdssa/diag-control-channel success 'Marketing protocol 4 and Control Center billing channel are healthy'
+          else post_status imdssa/diag-control-channel failure 'Marketing protocol 4/control billing channel verification failed'; fi
