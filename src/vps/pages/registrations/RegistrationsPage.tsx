@@ -33,10 +33,10 @@ type ReadFilter = 'all' | 'unread' | 'read';
 type TrialFilter = 'all' | 'active' | 'expired';
 
 const telegramLabels: Record<RegistrationItem['telegram_status'], string> = {
-  sent: 'Отправлен',
-  pending: 'Ожидает',
-  failed: 'Ошибка',
-  disabled: 'Отключён',
+  sent: 'Доставлено',
+  pending: 'Отправляется',
+  failed: 'Не доставлено',
+  disabled: 'Отключено',
 };
 
 function formatDate(value: string | null | undefined) {
@@ -51,7 +51,7 @@ function trialActive(item: RegistrationItem) {
 
 function remaining(item: RegistrationItem) {
   const diff = new Date(item.trial_ends_at).getTime() - Date.now();
-  if (diff <= 0) return 'Trial завершён';
+  if (diff <= 0) return 'Пробный доступ завершён';
   const hours = Math.ceil(diff / 3600000);
   if (hours < 24) return `${hours} ч.`;
   return `${Math.ceil(hours / 24)} дн.`;
@@ -77,7 +77,7 @@ export function RegistrationsPage({ organizations, realtimeTick, onOpenOrganizat
       setUnread(result.unread || 0);
       setError('');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Ошибка загрузки регистраций');
+      setError(reason instanceof Error ? reason.message : 'Не удалось загрузить регистрации');
     } finally {
       setLoading(false);
     }
@@ -135,28 +135,28 @@ export function RegistrationsPage({ organizations, realtimeTick, onOpenOrganizat
 
   return <section className="registrations-page">
     <div className="registrations-kpis">
-      <article><span>Регистрации</span><strong>{items.length}</strong><small>последние 100 событий</small></article>
-      <article className={unread ? 'warn' : ''}><span>Новые</span><strong>{unread}</strong><small>не просмотрены</small></article>
-      <article><span>Активный Trial</span><strong>{activeTrials}</strong><small>доступ ещё открыт</small></article>
-      <article className={telegramFailed ? 'danger' : ''}><span>Telegram ошибки</span><strong>{telegramFailed}</strong><small>доставка уведомлений</small></article>
-      <article><span>Provisioned</span><strong>{provisioned}</strong><small>организация создана</small></article>
+      <article><span>Регистрации</span><strong>{items.length}</strong><small>последние 100 записей</small></article>
+      <article className={unread ? 'warn' : ''}><span>Новые</span><strong>{unread}</strong><small>ещё не просмотрены</small></article>
+      <article><span>Пробный доступ</span><strong>{activeTrials}</strong><small>сейчас активен</small></article>
+      <article className={telegramFailed ? 'danger' : ''}><span>Не доставлено</span><strong>{telegramFailed}</strong><small>уведомлений Telegram</small></article>
+      <article><span>Организации созданы</span><strong>{provisioned}</strong><small>регистрация завершена</small></article>
     </div>
 
     <div className="registrations-toolbar">
-      <label className="registrations-search"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Компания, владелец, email, телефон, tenant…" /></label>
+      <label className="registrations-search"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Компания, владелец, email, телефон или ID клиента" /></label>
       <select value={productFilter} onChange={(event) => setProductFilter(event.target.value)}><option value="all">Все продукты</option>{products.map((product) => <option key={product} value={product}>{product}</option>)}</select>
       <select value={readFilter} onChange={(event) => setReadFilter(event.target.value as ReadFilter)}><option value="all">Все записи</option><option value="unread">Только новые</option><option value="read">Просмотренные</option></select>
-      <select value={trialFilter} onChange={(event) => setTrialFilter(event.target.value as TrialFilter)}><option value="all">Любой Trial</option><option value="active">Trial активен</option><option value="expired">Trial завершён</option></select>
+      <select value={trialFilter} onChange={(event) => setTrialFilter(event.target.value as TrialFilter)}><option value="all">Любой доступ</option><option value="active">Пробный доступ активен</option><option value="expired">Пробный доступ завершён</option></select>
       <button type="button" onClick={() => void load()} disabled={loading || busy}><RefreshCw size={15}/>{loading ? 'Обновление…' : 'Обновить'}</button>
-      {unread > 0 && <button type="button" className="primary" onClick={() => void markAllRead()} disabled={busy}><CheckCheck size={15}/>Прочитать все</button>}
+      {unread > 0 && <button type="button" className="primary" onClick={() => void markAllRead()} disabled={busy}><CheckCheck size={15}/>Отметить всё просмотренным</button>}
     </div>
 
-    {error && <div className="vps-error">API: {error}</div>}
+    {error && <div className="vps-error">{error}</div>}
 
     <div className="registrations-workspace">
       <div className="registrations-list-panel">
-        <div className="registrations-panel-head"><div><span>ONBOARDING STREAM</span><h2>Новые регистрации</h2></div><small>{filtered.length}</small></div>
-        {!filtered.length ? <EmptyState title="Регистраций нет" text="Новые organization.registered события появятся здесь автоматически." /> : <div className="registrations-list">{filtered.map((item) => <button key={item.id} type="button" className={`${selectedId === item.id ? 'active' : ''} ${!item.read_at ? 'unread' : ''}`} onClick={() => setSelectedId(item.id)}>
+        <div className="registrations-panel-head"><div><span>НОВЫЕ КЛИЕНТЫ</span><h2>Регистрации</h2></div><small>{filtered.length}</small></div>
+        {!filtered.length ? <EmptyState title="Регистраций нет" text="Новые регистрации появятся здесь автоматически." /> : <div className="registrations-list">{filtered.map((item) => <button key={item.id} type="button" className={`${selectedId === item.id ? 'active' : ''} ${!item.read_at ? 'unread' : ''}`} onClick={() => setSelectedId(item.id)}>
           <div className="registrations-list-icon"><Building2 size={17}/></div>
           <div className="registrations-list-copy"><div><strong>{item.company_name}</strong>{!item.read_at && <span className="registrations-new">Новая</span>}</div><span>{item.owner_name} · {item.source_product_code}</span><small>{item.owner_email}</small></div>
           <div className="registrations-list-meta"><Status value={trialActive(item) ? 'active' : 'expired'}/><small>{formatDate(item.created_at)}</small></div>
@@ -164,22 +164,22 @@ export function RegistrationsPage({ organizations, realtimeTick, onOpenOrganizat
       </div>
 
       <div className="registrations-detail-panel">
-        {!selected ? <EmptyState title="Выберите регистрацию" text="Справа появятся Trial, контакты и связанная организация." /> : <>
-          <div className="registrations-detail-head"><div><span>REGISTRATION</span><h2>{selected.company_name}</h2><p>{selected.source_product_code} · {selected.external_tenant_id}</p></div><div>{!selected.read_at && <button type="button" disabled={busy} onClick={() => void markRead(selected)}><CheckCheck size={14}/>Отметить прочитанной</button>}</div></div>
+        {!selected ? <EmptyState title="Выберите регистрацию" text="Справа появятся контакты, пробный период и связанная организация." /> : <>
+          <div className="registrations-detail-head"><div><span>КАРТОЧКА РЕГИСТРАЦИИ</span><h2>{selected.company_name}</h2><p>{selected.source_product_code} · ID {selected.external_tenant_id}</p></div><div>{!selected.read_at && <button type="button" disabled={busy} onClick={() => void markRead(selected)}><CheckCheck size={14}/>Отметить просмотренной</button>}</div></div>
 
-          <div className="registrations-provision-note"><Building2 size={18}/><div><strong>Организация создаётся автоматически.</strong><p>Сервер уже связывает registration event с организацией, доступом к продукту и Trial-подпиской. Этот экран контролирует факт ingestion и состояние onboarding.</p></div></div>
+          <div className="registrations-provision-note"><Building2 size={18}/><div><strong>Организация уже создаётся автоматически.</strong><p>После регистрации Control Center связывает клиента с продуктом и открывает пробный доступ. Здесь можно проверить результат и перейти в карточку организации.</p></div></div>
 
           <div className="registrations-facts">
             <div><span>Владелец</span><strong>{selected.owner_name}</strong></div>
             <div><span>Email</span><strong>{selected.owner_email}</strong></div>
             <div><span>Телефон</span><strong>{selected.owner_phone}</strong></div>
             <div><span>Продукт</span><strong>{selected.source_product_code}</strong></div>
-            <div><span>External tenant</span><strong>{selected.external_tenant_id}</strong></div>
+            <div><span>ID клиента в продукте</span><strong>{selected.external_tenant_id}</strong></div>
             <div><span>Организация</span><strong>{organizations.find((item) => item.id === selected.organization_id)?.name || selected.organization_id}</strong></div>
           </div>
 
           <div className="registrations-trial-card">
-            <div><TimerReset size={18}/><span><small>TRIAL</small><strong>{selected.trial_status}</strong></span></div>
+            <div><TimerReset size={18}/><span><small>ПРОБНЫЙ ДОСТУП</small><strong>{selected.trial_status}</strong></span></div>
             <div><span>Начало</span><strong>{formatDate(selected.trial_started_at)}</strong></div>
             <div><span>Окончание</span><strong>{formatDate(selected.trial_ends_at)}</strong></div>
             <div className={trialActive(selected) ? 'active' : 'expired'}><Clock3 size={15}/><strong>{remaining(selected)}</strong></div>
@@ -192,10 +192,10 @@ export function RegistrationsPage({ organizations, realtimeTick, onOpenOrganizat
           </div>
 
           <div className={`registrations-telegram-card ${selected.telegram_status}`}>
-            <MessageCircle size={18}/><div><span>TELEGRAM DELIVERY</span><strong>{telegramLabels[selected.telegram_status]}</strong><small>{selected.telegram_error || 'Ошибок доставки нет'}</small></div>
+            <MessageCircle size={18}/><div><span>УВЕДОМЛЕНИЕ TELEGRAM</span><strong>{telegramLabels[selected.telegram_status]}</strong><small>{selected.telegram_error || 'Ошибок доставки нет'}</small></div>
           </div>
 
-          <div className="registrations-meta"><span>Event ID</span><code>{selected.event_id}</code><span>Получено</span><strong>{formatDate(selected.created_at)}</strong><span>Просмотрено</span><strong>{formatDate(selected.read_at)}</strong></div>
+          <div className="registrations-meta"><span>Получено</span><strong>{formatDate(selected.created_at)}</strong><span>Просмотрено</span><strong>{formatDate(selected.read_at)}</strong></div>
         </>}
       </div>
     </div>
