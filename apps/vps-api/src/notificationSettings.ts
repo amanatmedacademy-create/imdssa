@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
+import { handleBillingApi } from './billing.js';
 import { handleProductCommercialApi } from './productCommercial.js';
 import { handleSessionApi } from './sessionRoutes.js';
 import { handleSubscriptionApi } from './subscriptions.js';
@@ -111,6 +112,7 @@ export async function handleNotificationSettingsApi(req: IncomingMessage, res: S
   if (await handleSessionApi({ req, res, pool, url, method, user, json })) return true;
   if (await handleProductCommercialApi({ req, res, pool, url, method, user, json })) return true;
   if (await handleSubscriptionApi({ req, res, pool, url, method, user, json })) return true;
+  if (await handleBillingApi({ req, res, pool, url, method, user, json })) return true;
 
   const path = '/api/v1/settings/notifications/telegram';
   if (url.pathname !== path && url.pathname !== `${path}/test`) return false;

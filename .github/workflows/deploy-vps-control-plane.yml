@@ -52,6 +52,7 @@ jobs:
           cp deploy/vps/migrations/010_product_commercial_catalog.sql .deploy-stage/010_product_commercial_catalog.sql
           cp deploy/vps/migrations/011_product_commercial_model.sql .deploy-stage/011_product_commercial_model.sql
           cp deploy/vps/migrations/012_organization_product_subscriptions.sql .deploy-stage/012_organization_product_subscriptions.sql
+          cp deploy/vps/migrations/014_billing_invoices_payments.sql .deploy-stage/014_billing_invoices_payments.sql
           cp deploy/vps/nginx-super-admin.conf .deploy-stage/nginx.conf
           cp deploy/vps/deploy-control-plane.sh .deploy-stage/deploy-control-plane.sh
           cp deploy/vps/product-monitor.sh .deploy-stage/product-monitor.sh
@@ -87,12 +88,13 @@ jobs:
           sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 --command="insert into app.auth_sessions(user_id,token_hash,expires_at) values ('$ADMIN_ID'::uuid,'$TOKEN_HASH',now()+interval '10 minutes')" >/dev/null
           cleanup() { sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$TOKEN_HASH'" >/dev/null 2>&1 || true; }
           trap cleanup EXIT
-          for route in /api/auth/me /api/v1/overview /api/v1/control-commands /api/v1/notifications /api/v1/settings/notifications/telegram /api/v1/access/users /api/v1/subscriptions "/api/v1/products/$PRODUCT_ID/commercial"; do
+          for route in /api/auth/me /api/v1/overview /api/v1/control-commands /api/v1/notifications /api/v1/settings/notifications/telegram /api/v1/access/users /api/v1/subscriptions /api/v1/billing/overview /api/v1/billing/invoices /api/v1/billing/payments "/api/v1/products/$PRODUCT_ID/commercial"; do
             curl -fsS --max-time 15 -H "Cookie: imdssa_session=$TOKEN" "$API$route" >/dev/null
           done
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.organization_memberships') is not null" | grep -q '^t$'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.product_limit_catalog') is not null and to_regclass('app.product_module_prices') is not null and to_regclass('app.product_module_dependencies') is not null and to_regclass('app.product_plan_revisions') is not null" | grep -q '^t$'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.product_subscriptions') is not null and to_regclass('app.product_subscription_items') is not null and to_regclass('app.product_subscription_events') is not null" | grep -q '^t$'
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.billing_accounts') is not null and to_regclass('app.billing_invoices') is not null and to_regclass('app.billing_invoice_lines') is not null and to_regclass('app.billing_payments') is not null and to_regclass('app.billing_payment_allocations') is not null and to_regclass('app.billing_events') is not null" | grep -q '^t$'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select not exists(select 1 from app.organization_products op left join app.product_subscriptions s on s.organization_id=op.organization_id and s.product_id=op.product_id where s.id is null)" | grep -q '^t$'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select exists(select 1 from app.modules where code='marketing.ai' and status='published')" | grep -q '^t$'
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select commercial_role from app.product_module_commercial c join app.modules m on m.id=c.module_id where m.code='marketing.voice-transcription'" | grep -q '^feature$'
