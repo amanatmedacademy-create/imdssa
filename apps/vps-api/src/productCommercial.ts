@@ -81,9 +81,17 @@ export async function handleProductCommercialApi(args: {
   if (paymentMatch && method === 'PUT') {
     if (!canManage(user)) { json(res,403,{error:'PLATFORM_ADMIN_REQUIRED'}); return true; }
     const data=await body(req); const items=Array.isArray(data.items)?data.items:[]; const client=await pool.connect();
-    try { await client.query('begin');
-      for (const raw of items) { const item=raw && typeof raw==='object' ? raw as Record<string,unknown> : {}; const methodName=text(item.method); if (!['bank_transfer','kaspi','card'].includes(methodName)) continue; await client.query(`insert into app.product_payment_methods(product_id,method,enabled,is_default,display_name,instructions,sort_order,updated_at)
-        values($1,$2,$3,$4,$5,nullif($6,''),$7,now()) on conflict(product_id,method) do update set enabled=excluded.enabled,is_default=excluded.is_default,display_name=excluded.display_name,instructions=excluded.instructions,sort_order=excluded.sort_order,updated_at=now()`,[paymentMatch[1],methodName,item.enabled!==false,item.isDefault===true,text(item.displayName)||methodName,text(item.instructions),Number(item.sortOrder ?? 100)]); }
+    try {
+      await client.query('begin');
+      await client.query('update app.product_payment_methods set is_default=false,updated_at=now() where product_id=$1 and is_default=true',[paymentMatch[1]]);
+      for (const raw of items) {
+        const item=raw && typeof raw==='object' ? raw as Record<string,unknown> : {};
+        const methodName=text(item.method);
+        if (!['bank_transfer','kaspi','card'].includes(methodName)) continue;
+        await client.query(`insert into app.product_payment_methods(product_id,method,enabled,is_default,display_name,instructions,sort_order,updated_at)
+          values($1,$2,$3,$4,$5,nullif($6,''),$7,now()) on conflict(product_id,method) do update set enabled=excluded.enabled,is_default=excluded.is_default,display_name=excluded.display_name,instructions=excluded.instructions,sort_order=excluded.sort_order,updated_at=now()`,
+          [paymentMatch[1],methodName,item.enabled!==false,item.isDefault===true,text(item.displayName)||methodName,text(item.instructions),Number(item.sortOrder ?? 100)]);
+      }
       await client.query('commit'); json(res,200,{ok:true});
     } catch(error){await client.query('rollback');throw error;} finally{client.release();}
     return true;
