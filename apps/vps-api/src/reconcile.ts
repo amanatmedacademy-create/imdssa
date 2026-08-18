@@ -29,6 +29,18 @@ type BindingRow = {
   entitlement_status: string | null;
 };
 
+type SubscriptionRow = {
+  status: string;
+  trial_ends_at: string | null;
+  current_period_end: string | null;
+  grace_ends_at: string | null;
+  access_ends_at: string | null;
+  renewal_mode: string | null;
+  currency: string;
+  payment_method: string | null;
+  limits: Record<string, unknown> | null;
+};
+
 type RemoteTenant = { id: string; name: string; slug: string };
 
 function normalized(value: string): string {
@@ -96,7 +108,12 @@ async function processCommand(command: CommandRow) {
   if (!command.adapter_base_url) throw new Error('ADAPTER_BASE_URL_REQUIRED');
 
   const remoteTenantId = await resolveRemoteTenant(command, binding);
-  const productEnabled = binding.organization_status === 'active' && binding.product_status !== 'disabled' && binding.entitlement_status === 'active';
+  const subscriptionResult = await pool.query<SubscriptionRow>(`select status,trial_ends_at,current_period_end,grace_ends_at,access_ends_at,renewal_mode,currency,payment_method,limits
+    from app.product_subscriptions where organization_id=$1 and product_id=$2`, [command.organization_id,command.product_id]);
+  const subscription = subscriptionResult.rows[0] ?? null;
+  const subscriptionAllowsProduct = !subscription || subscription.status !== 'suspended';
+  const productEnabled = binding.organization_status === 'active' && binding.product_status !== 'disabled' && binding.entitlement_status === 'active' && subscriptionAllowsProduct;
+
   const moduleRows = await pool.query<{ code: string; enabled: boolean }>(`select m.code,
     (coalesce(mi.status::text,'')='active' and $3::boolean) enabled
     from app.modules m
@@ -104,12 +121,33 @@ async function processCommand(command: CommandRow) {
     where m.owner_product_id=$2 and m.status='published'
     order by m.code`, [command.organization_id, command.product_id, productEnabled]);
   const modules = Object.fromEntries(moduleRows.rows.map((row) => [row.code, productEnabled && row.enabled]));
+
+  const paymentRows = await pool.query<{method:string;display_name:string;instructions:string|null;is_default:boolean}>(`select method,display_name,instructions,is_default
+    from app.product_payment_methods where product_id=$1 and enabled=true order by sort_order,method`, [command.product_id]);
+  const paymentMethods = paymentRows.rows.map((row) => ({ method:row.method,displayName:row.display_name,instructions:row.instructions,isDefault:row.is_default }));
+  const defaultPaymentMethod = subscription?.payment_method || paymentRows.rows.find((row) => row.is_default)?.method || null;
+  const billingStatus = subscription?.status === 'canceled' ? 'cancelled' : subscription?.status ?? null;
+  const billing = subscription ? {
+    subscriptionStatus: billingStatus,
+    trialEndsAt: subscription.trial_ends_at,
+    periodEndsAt: subscription.current_period_end,
+    graceEndsAt: subscription.grace_ends_at,
+    accessEndsAt: subscription.access_ends_at,
+    renewalMode: subscription.renewal_mode,
+    currency: subscription.currency || 'KZT',
+    paymentMethods,
+    defaultPaymentMethod,
+  } : null;
+  const limits = subscription?.limits && typeof subscription.limits === 'object' ? subscription.limits : {};
+
   const payload = {
     organizationId: command.organization_id,
     tenantId: remoteTenantId,
     revision: binding.desired_revision,
     productEnabled,
     modules,
+    limits,
+    billing,
   };
 
   const response = await platformFetch(command.adapter_base_url, '/internal/platform/entitlements/apply', {
