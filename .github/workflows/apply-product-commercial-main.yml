@@ -26,28 +26,35 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Apply product commercial integration
-        run: python3 scripts/apply-product-commercial-main.py
-      - name: Validate API and frontend
+      - name: Apply and validate product commercial integration
+        shell: bash
         env:
           VITE_RUNTIME: vps
           VITE_APP_ENV: production
           VITE_APP_VERSION: 0.8.0
           IMDS_STRICT_ENV: 'true'
         run: |
-          set -euo pipefail
-          npm install --no-audit --no-fund
-          npm run lint --workspace @imds/vps-api
-          npm run build --workspace @imds/vps-api
-          npm run lint
-          npm run build
-      - name: Commit integration to main
-        shell: bash
-        run: |
-          set -euo pipefail
+          set -uo pipefail
+          python3 scripts/apply-product-commercial-main.py > /tmp/product-commercial.log 2>&1
+          rc=$?
+          if [ $rc -eq 0 ]; then npm install --no-audit --no-fund >> /tmp/product-commercial.log 2>&1; rc=$?; fi
+          if [ $rc -eq 0 ]; then npm run lint --workspace @imds/vps-api >> /tmp/product-commercial.log 2>&1; rc=$?; fi
+          if [ $rc -eq 0 ]; then npm run build --workspace @imds/vps-api >> /tmp/product-commercial.log 2>&1; rc=$?; fi
+          if [ $rc -eq 0 ]; then npm run lint >> /tmp/product-commercial.log 2>&1; rc=$?; fi
+          if [ $rc -eq 0 ]; then npm run build >> /tmp/product-commercial.log 2>&1; rc=$?; fi
           git config user.name 'IMDS Automation'
           git config user.email 'automation@imds.local'
-          git add apps/vps-api/src/index.ts src/vps/VpsApp.tsx deploy/vps/deploy-control-plane.sh .github/workflows/deploy-vps-control-plane.yml
+          if [ $rc -ne 0 ]; then
+            mkdir -p docs/internal
+            cp /tmp/product-commercial.log docs/internal/product-commercial-validation.log
+            git add docs/internal/product-commercial-validation.log
+            git commit -m 'record product commercial validation failure' || true
+            git pull --rebase origin main
+            git push origin HEAD:main
+            exit $rc
+          fi
+          rm -f docs/internal/product-commercial-validation.log
+          git add apps/vps-api/src/index.ts src/vps/VpsApp.tsx deploy/vps/deploy-control-plane.sh .github/workflows/deploy-vps-control-plane.yml docs/internal/product-commercial-validation.log 2>/dev/null || true
           git diff --cached --check
           if git diff --cached --quiet; then
             echo 'No integration changes to commit'
@@ -56,4 +63,3 @@ jobs:
             git pull --rebase origin main
             git push origin HEAD:main
           fi
-# retrigger direct-main integration
