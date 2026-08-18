@@ -17,7 +17,7 @@ if 'handleProductCommercialApi({ req, res, pool, url, method, user, json })' not
     s = replace_once(s, anchor, anchor + "  if (await handleProductCommercialApi({ req, res, pool, url, method, user, json })) return;\n\n", 'commercial api route')
 p.write_text(s)
 
-# UI integration: Products becomes a clean product catalog with nested commercial configuration.
+# UI integration: Products is only the product catalog; modules/prices/tariffs live inside a product.
 p = Path('src/vps/VpsApp.tsx')
 s = p.read_text()
 if "ProductCommercialCenter" not in s:
@@ -27,32 +27,34 @@ start = s.find("  {tab === 'products' &&")
 end = s.find("\n  {tab === 'modules' &&", start)
 if start < 0 or end < 0:
     raise SystemExit('missing products UI block')
-s = s[:start] + "  {tab === 'products' && <ProductCommercialCenter products={products} canManage={canManagePlatform} />}\n" + s[end:]
+replacement = "  {tab === 'products' && <ProductCommercialCenter products={products} canManage={canManagePlatform} />}\n"
+s = s[:start] + replacement + s[end:]
 p.write_text(s)
 
-# Runtime migration list.
+# Runtime migration list follows current tenant-user migration 008.
 p = Path('deploy/vps/deploy-control-plane.sh')
 s = p.read_text()
-if '008_product_commercial_catalog.sql' not in s:
-    marker = '007_notification_delivery_settings.sql; do'
-    s = replace_once(s, marker, '007_notification_delivery_settings.sql 008_product_commercial_catalog.sql; do', 'deploy migration list')
+if '009_product_commercial_catalog.sql' not in s:
+    marker = '008_tenant_user_access.sql; do'
+    s = replace_once(s, marker, '008_tenant_user_access.sql 009_product_commercial_catalog.sql; do', 'deploy migration list')
 p.write_text(s)
 
 # Deployment staging and authenticated verification.
 p = Path('.github/workflows/deploy-vps-control-plane.yml')
 s = p.read_text()
-if '008_product_commercial_catalog.sql .deploy-stage/008_product_commercial_catalog.sql' not in s:
-    anchor = '          cp deploy/vps/migrations/007_notification_delivery_settings.sql .deploy-stage/007_notification_delivery_settings.sql\n'
-    s = replace_once(s, anchor, anchor + '          cp deploy/vps/migrations/008_product_commercial_catalog.sql .deploy-stage/008_product_commercial_catalog.sql\n', 'stage commercial migration')
+if '009_product_commercial_catalog.sql .deploy-stage/009_product_commercial_catalog.sql' not in s:
+    anchor = '          cp deploy/vps/migrations/008_tenant_user_access.sql .deploy-stage/008_tenant_user_access.sql\n'
+    if anchor not in s:
+        anchor = '          cp deploy/vps/migrations/007_notification_delivery_settings.sql .deploy-stage/007_notification_delivery_settings.sql\n'
+    s = replace_once(s, anchor, anchor + '          cp deploy/vps/migrations/009_product_commercial_catalog.sql .deploy-stage/009_product_commercial_catalog.sql\n', 'stage commercial migration')
 if "to_regclass('app.product_plans')" not in s:
-    anchor = "          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command=\"select to_regclass('app.organization_memberships') is not null\" | grep -q '^t$'\n"
     check = "          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command=\"select to_regclass('app.product_plans') is not null and to_regclass('app.product_module_commercial') is not null\" | grep -q '^t$'\n"
+    anchor = "          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command=\"select to_regclass('app.organization_memberships') is not null\" | grep -q '^t$'\n"
     if anchor in s:
         s = s.replace(anchor, anchor + check, 1)
     else:
-        route_anchor = '          done\n'
-        pos = s.find(route_anchor, s.find('Verify Super Admin authenticated runtime'))
+        pos = s.find('          done\n', s.find('Verify Super Admin authenticated runtime'))
         if pos < 0: raise SystemExit('missing deploy verification anchor')
-        pos += len(route_anchor)
+        pos += len('          done\n')
         s = s[:pos] + check + s[pos:]
 p.write_text(s)
