@@ -7,6 +7,7 @@ import { SessionManagementBridge } from './features/security/SessionManagementBr
 import { OrganizationSubscriptionBridge } from './features/subscriptions/OrganizationSubscriptionBridge';
 import './notifications.css';
 import { installControlCenterBranding } from './vps/branding';
+import { InfrastructureCenter } from './vps/InfrastructureCenter';
 import { VpsApp } from './vps/VpsApp';
 
 const rootElement = document.getElementById('root');
@@ -15,7 +16,7 @@ const root = ReactDOM.createRoot(rootElement);
 
 if (import.meta.env.VITE_RUNTIME === 'vps') {
   installControlCenterBranding(rootElement);
-  root.render(<><VpsApp /><NotificationBell /><UserAccessOverlay /><ProductCommercialBridge /><OrganizationSubscriptionBridge /><VpsBillingBridge /><SessionManagementBridge /></>);
+  root.render(<><VpsApp /><InfrastructureCenter /><NotificationBell /><UserAccessOverlay /><ProductCommercialBridge /><OrganizationSubscriptionBridge /><VpsBillingBridge /><SessionManagementBridge /></>);
 } else {
   void import('./LegacyApp').then(({ LegacyApp }) => {
     root.render(<LegacyApp />);
