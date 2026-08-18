@@ -66,8 +66,8 @@ async function recordPayment(pool: Pool, input: {
 
 async function handleVerifiedFeed(req: IncomingMessage,res: ServerResponse,pool: Pool,method: string) {
   if (method !== 'POST') { json(res,405,{error:'METHOD_NOT_ALLOWED'}); return true; }
-  const expected = String(process.env.IMDS_PLATFORM_CONTROL_TOKEN || '').trim();
-  if (!expected || bearer(req) !== expected) { json(res,401,{error:'PLATFORM_CONTROL_UNAUTHORIZED'}); return true; }
+  const expected = String(process.env.IMDS_BILLING_PROVIDER_TOKEN || '').trim();
+  if (!expected || bearer(req) !== expected) { json(res,401,{error:'BILLING_PROVIDER_UNAUTHORIZED'}); return true; }
   const payload = await jsonBody(req);
   const provider = text(payload.provider).toLowerCase();
   const eventReference = text(payload.eventReference || payload.externalReference);
