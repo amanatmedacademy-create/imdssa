@@ -17,7 +17,7 @@ if 'handleProductCommercialApi({ req, res, pool, url, method, user, json })' not
     s = replace_once(s, anchor, anchor + "  if (await handleProductCommercialApi({ req, res, pool, url, method, user, json })) return;\n\n", 'commercial api route')
 p.write_text(s)
 
-# UI integration: Products is only the product catalog; modules/prices/tariffs live inside a product.
+# UI integration. Platform users configure the product catalog. Tenant users retain a read-only product list.
 p = Path('src/vps/VpsApp.tsx')
 s = p.read_text()
 if "ProductCommercialCenter" not in s:
@@ -27,13 +27,16 @@ start = s.find("  {tab === 'products' &&")
 end = s.find("\n  {tab === 'modules' &&", start)
 if start < 0 or end < 0:
     raise SystemExit('missing products UI block')
-replacement = "  {tab === 'products' && <ProductCommercialCenter products={products} canManage={canManagePlatform} />}\n"
+tenant_products = "<section className=\"vps-card\"><div className=\"vps-card-head\"><div><span>ПРОДУКТЫ</span><h2>Доступные продукты</h2></div></div>{products.length === 0 ? <EmptyState title=\"Нет доступных продуктов\" text=\"Для вашей организации продукты ещё не подключены.\" /> : <div className=\"vps-table-wrap\"><table><thead><tr><th>Продукт</th><th>Статус</th><th>Состояние</th></tr></thead><tbody>{products.map((x) => <tr key={x.id}><td><strong>{x.name}</strong><small>{x.code}</small></td><td><Status value={x.status} /></td><td><Status value={x.last_health} /></td></tr>)}</tbody></table></div>}</section>"
+replacement = "  {tab === 'products' && (user.scope === 'platform' ? <ProductCommercialCenter products={products} canManage={canManagePlatform} /> : " + tenant_products + ")}\n"
 s = s[:start] + replacement + s[end:]
 p.write_text(s)
 
-# Runtime migration list follows tenant user access migration 009.
+# Normalize the current migration sequence and remove stale commercial migration numbers.
 p = Path('deploy/vps/deploy-control-plane.sh')
 s = p.read_text()
+s = s.replace(' 008_product_commercial_catalog.sql', '')
+s = s.replace(' 009_product_commercial_catalog.sql', '')
 if '010_product_commercial_catalog.sql' not in s:
     marker = '009_tenant_user_access.sql; do'
     s = replace_once(s, marker, '009_tenant_user_access.sql 010_product_commercial_catalog.sql; do', 'deploy migration list')
@@ -42,6 +45,8 @@ p.write_text(s)
 # Deployment staging and authenticated verification.
 p = Path('.github/workflows/deploy-vps-control-plane.yml')
 s = p.read_text()
+s = s.replace('          cp deploy/vps/migrations/008_product_commercial_catalog.sql .deploy-stage/008_product_commercial_catalog.sql\n', '')
+s = s.replace('          cp deploy/vps/migrations/009_product_commercial_catalog.sql .deploy-stage/009_product_commercial_catalog.sql\n', '')
 if '010_product_commercial_catalog.sql .deploy-stage/010_product_commercial_catalog.sql' not in s:
     anchor = '          cp deploy/vps/migrations/009_tenant_user_access.sql .deploy-stage/009_tenant_user_access.sql\n'
     if anchor not in s:
