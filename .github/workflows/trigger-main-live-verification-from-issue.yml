@@ -14,13 +14,18 @@ jobs:
     if: github.event.issue.number == 47
     runs-on: ubuntu-latest
     steps:
-      - name: Mark trigger start
+      - name: Dispatch one-shot verifier with diagnostics
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: gh issue comment 47 --repo "$REPO" --body 'trigger_started=true'
-      - name: Dispatch one-shot verifier
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: gh workflow run scheduled-main-live-verification.yml --repo "$REPO" --ref main
+        shell: bash
+        run: |
+          set +e
+          output="$(gh workflow run scheduled-main-live-verification.yml --repo "$REPO" --ref main 2>&1)"
+          rc=$?
+          gh issue comment 47 --repo "$REPO" --body "dispatch_result rc=$rc
+
+\`\`\`
+$output
+\`\`\`"
+          exit "$rc"
