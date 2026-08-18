@@ -6,34 +6,19 @@ const host = '127.0.0.1';
 const port = 4173;
 const baseUrl = `http://${host}:${port}`;
 const distAssetsDir = fileURLToPath(new URL('../dist/assets/', import.meta.url));
-const routes = [
-  '/',
-  '/companies',
-  '/products',
-  '/subscriptions',
-  '/billing',
-  '/users',
-  '/integrations',
-  '/operations',
-  '/observability',
-  '/analytics',
-  '/security',
-  '/support',
-  '/governance',
-  '/settings',
-];
+const routes = ['/'];
 
 const requiredCssMarkers = [
-  '.app-shell',
-  '.identity-user-grid',
-  '.operations-toolbar',
-  '.security-toolbar',
-  '.analytics-product-grid',
-  '.observability-service-grid',
-  '.support-customer-grid',
-  '.governance-tabs',
-  '.tabs',
-  '.tab-bar',
+  '.vps-login',
+  '.vps-login-card',
+  '.vps-shell',
+  '.vps-sidebar',
+  '.vps-content',
+  '.vps-card',
+  '.vps-status',
+  '.vps-form-grid',
+  '.vps-events',
+  '.vps-live',
 ];
 
 function fail(message) {
@@ -91,7 +76,7 @@ async function readBuiltCss() {
 
 const viteCli = fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url));
 const child = spawn(process.execPath, [viteCli, 'preview', '--host', host, '--port', String(port), '--strictPort'], {
-  env: { ...process.env, VITE_APP_ENV: 'demo' },
+  env: { ...process.env, VITE_APP_ENV: 'development', VITE_RUNTIME: 'vps' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 
@@ -134,7 +119,7 @@ try {
     if (!combinedCss.includes(marker)) fail(`compiled CSS is missing required selector ${marker}`);
   }
 
-  console.log(`[frontend smoke] passed ${routes.length} routes, ${cssFiles.length} CSS bundle(s), ${jsAssets.length} entry JS bundle(s)`);
+  console.log(`[frontend smoke] passed ${routes.length} route(s), ${cssFiles.length} CSS bundle(s), ${jsAssets.length} entry JS bundle(s)`);
 } catch (error) {
   console.error(output.trim());
   console.error(error instanceof Error ? error.message : error);
