@@ -1,0 +1,98 @@
+name: Verify Product Commercial Main
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-product-commercial-main.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate source
+        shell: bash
+        env:
+          VITE_RUNTIME: vps
+          VITE_APP_ENV: production
+          VITE_APP_VERSION: 0.8.0
+          IMDS_STRICT_ENV: 'true'
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run lint --workspace @imds/vps-api
+          npm run build --workspace @imds/vps-api
+          npm run lint
+          npm run build
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Verify live product commercial runtime
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          success=''
+          for _ in $(seq 1 90); do
+            if sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          API=http://127.0.0.1:8788
+          systemctl is-active --quiet imds-super-admin-api.service
+          test "$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.product_plans') is not null and to_regclass('app.product_module_commercial') is not null and to_regclass('app.product_plan_prices') is not null and to_regclass('app.product_plan_modules') is not null and to_regclass('app.product_payment_methods') is not null")" = t
+          PRODUCT_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.products where code='imds-marketing' limit 1")"
+          test -n "$PRODUCT_ID"
+          TOKEN="$(openssl rand -hex 32)"
+          TOKEN_HASH="$(printf '%s' "$TOKEN" | sha256sum | awk '{print $1}')"
+          ADMIN_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by created_at limit 1")"
+          test -n "$ADMIN_ID"
+          cleanup(){ sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$TOKEN_HASH'" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 --command="insert into app.auth_sessions(user_id,token_hash,expires_at) values ('$ADMIN_ID'::uuid,'$TOKEN_HASH',now()+interval '5 minutes')" >/dev/null
+          curl -fsS --max-time 15 -H "Cookie: imdssa_session=$TOKEN" "$API/api/v1/products/$PRODUCT_ID/commercial" -o /tmp/product-commercial.json
+          python3 - <<'PY'
+          import json
+          with open('/tmp/product-commercial.json', encoding='utf-8') as f:
+              data=json.load(f)
+          assert data['product']['code']=='imds-marketing'
+          assert isinstance(data.get('modules'), list) and len(data['modules']) >= 1
+          assert isinstance(data.get('plans'), list)
+          assert isinstance(data.get('paymentMethods'), list)
+          PY
+          grep -R -q 'Тарифы, цены и лимиты' /var/www/imds-super-admin/current/assets
+          grep -R -q 'Способы оплаты' /var/www/imds-super-admin/current/assets
+          echo "release=$(basename "$(readlink -f /var/www/imds-super-admin/current)")"
+          REMOTE
+            then success=1; break; fi
+            sleep 5
+          done
+          test "$success" = 1
+      - name: Record verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p docs/internal
+          printf 'product_commercial_production=passed\nverified_from=%s\n' "$GITHUB_SHA" > docs/internal/product-commercial-production.ok
+          git config user.name 'IMDS Automation'
+          git config user.email 'automation@imds.local'
+          git add docs/internal/product-commercial-production.ok
+          git commit -m 'record product commercial production verification'
+          git pull --rebase origin main
+          git push origin HEAD:main
