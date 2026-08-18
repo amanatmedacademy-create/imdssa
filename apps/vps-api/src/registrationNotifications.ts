@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
 import { loadTelegramDeliverySettings } from './notificationSettings.js';
 import { handleInternalBillingGateway } from './internalBillingGateway.js';
+import { handleProviderPayments } from './providerPayments.js';
 
 type RegistrationPayload = {
   eventId: string;
@@ -117,6 +118,7 @@ async function sendTelegram(pool: Pool, event: RegistrationPayload): Promise<{ s
 }
 
 export async function handleInternalRegistrationEvent(req: IncomingMessage, res: ServerResponse, pool: Pool, url: URL, method: string): Promise<boolean> {
+  if (await handleProviderPayments(req,res,pool,url,method)) return true;
   if (await handleInternalBillingGateway(req,res,pool,url,method)) return true;
   if (url.pathname !== '/internal/platform/events/registration') return false;
   if (method !== 'POST') { json(res, 405, { error: 'METHOD_NOT_ALLOWED' }); return true; }
