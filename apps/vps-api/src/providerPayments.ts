@@ -34,13 +34,17 @@ function cloudSignature(req: IncomingMessage): string {
   const direct = req.headers['content-hmac'] || req.headers['x-content-hmac'];
   return Array.isArray(direct) ? String(direct[0] || '') : String(direct || '');
 }
+function uuidOrNull(value: string): string | null {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value : null;
+}
 
 async function resolveInvoice(pool: Pool, input: { invoiceId?: string; invoiceNumber?: string }) {
-  const invoiceId = text(input.invoiceId);
-  const invoiceNumber = text(input.invoiceNumber);
+  const rawId = text(input.invoiceId);
+  const invoiceId = uuidOrNull(rawId);
+  const invoiceNumber = text(input.invoiceNumber) || (invoiceId ? '' : rawId);
   if (!invoiceId && !invoiceNumber) return null;
   const result = await pool.query(`select i.*,o.external_key from app.billing_invoices i join app.organizations o on o.id=i.organization_id
-    where ($1<>'' and i.id=$1::uuid) or ($1='' and $2<>'' and i.invoice_number=$2) limit 1`, [invoiceId,invoiceNumber]);
+    where ($1::uuid is not null and i.id=$1::uuid) or ($2<>'' and i.invoice_number=$2) limit 1`, [invoiceId,invoiceNumber]);
   return result.rows[0] ?? null;
 }
 
@@ -57,7 +61,7 @@ async function recordPayment(pool: Pool, input: {
   const result = await pool.query(`select app.record_verified_billing_payment($1::uuid,$2,$3::numeric,$4,$5,$6::timestamptz,$7::jsonb) result`, [
     input.invoiceId,input.method,input.amountKzt,input.externalReference,text(input.payerName)||null,receivedAt,JSON.stringify(input.metadata || {}),
   ]);
-  return result.rows[0]?.result;
+  return result.rows[0]?.result as JsonRecord | undefined;
 }
 
 async function handleVerifiedFeed(req: IncomingMessage,res: ServerResponse,pool: Pool,method: string) {
@@ -95,7 +99,8 @@ async function handleCloudPayments(req: IncomingMessage,res: ServerResponse,pool
   const raw = req.method === 'GET' ? url.search.slice(1) : await rawBody(req);
   if (!secureHmac(raw,cloudSignature(req),secret)) { json(res,401,{code:13}); return true; }
   const params = Object.fromEntries(new URLSearchParams(raw).entries());
-  const invoice = await resolveInvoice(pool,{invoiceId:text(params.InvoiceId),invoiceNumber:text(params.InvoiceId)});
+  const providerInvoiceId = text(params.InvoiceId);
+  const invoice = await resolveInvoice(pool,{invoiceId:providerInvoiceId,invoiceNumber:providerInvoiceId});
   if (!invoice) { json(res,200,{code:10}); return true; }
   if (text(params.AccountId) && text(params.AccountId) !== text(invoice.external_key) && text(params.AccountId) !== text(invoice.organization_id)) { json(res,200,{code:10}); return true; }
   if (params.Amount && Math.abs(Number(params.Amount)-Number(invoice.total_kzt)) > 0.01) { json(res,200,{code:12}); return true; }
