@@ -33,12 +33,28 @@ jobs:
           test -n "$VPS_PASSWORD"
           test -n "$MARKETING_SHA"
 
+      - name: Publish bridge started
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d '{"state":"pending","context":"imdssa/marketing-vps-bridge","description":"Marketing VPS bridge started"}' >/dev/null
+
       - name: Checkout Marketing tested revision
         uses: actions/checkout@v4
         with:
           repository: amanatmedacademy-create/marketing
           ref: ${{ env.MARKETING_SHA }}
           path: marketing
+
+      - name: Publish checkout success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d '{"state":"success","context":"imdssa/marketing-bridge-checkout","description":"Marketing source checkout succeeded"}' >/dev/null
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -54,6 +70,14 @@ jobs:
           npm run test:fail-closed
           npm run typecheck
           npm run build
+
+      - name: Publish source verification success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d '{"state":"success","context":"imdssa/marketing-bridge-source","description":"Marketing tests, typecheck and build passed"}' >/dev/null
 
       - name: Package Marketing release
         working-directory: marketing
@@ -81,6 +105,14 @@ jobs:
             /tmp/imds-install-release.sh /tmp/imds-marketing-release.tgz 6c965b6887a9
           '
 
+      - name: Publish install success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d '{"state":"success","context":"imdssa/marketing-bridge-install","description":"Marketing release installed on VPS"}' >/dev/null
+
       - name: Verify centralized subscription runtime
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
@@ -100,6 +132,14 @@ jobs:
           curl -fsS --max-time 10 http://127.0.0.1:8787/api/health >/dev/null
           REMOTE
 
+      - name: Publish runtime success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d '{"state":"success","context":"imdssa/marketing-bridge-runtime","description":"Marketing protocol 4 runtime verified"}' >/dev/null
+
       - name: Publish bridge status
         if: always()
         env:
@@ -108,11 +148,10 @@ jobs:
         run: |
           set -euo pipefail
           state=failure
-          description='Marketing VPS bridge failed'
+          description='Marketing VPS bridge failed; inspect stage statuses'
           if [ "$JOB_STATUS" = success ]; then state=success; description='Marketing VPS protocol 4 verified'; fi
           curl -fsS -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
             -d "{\"state\":\"$state\",\"context\":\"imdssa/marketing-vps-bridge\",\"description\":\"$description\"}"
