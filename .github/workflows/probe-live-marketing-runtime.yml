@@ -1,0 +1,107 @@
+name: Probe Live Marketing Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/probe-live-marketing-runtime.yml
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: probe-live-marketing-runtime
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - name: Validate VPS access
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          test -n "$VPS_PASSWORD"
+
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Probe Marketing runtime directly
+        id: probe
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          OUTPUT="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          source /etc/imds-platform-control.env
+          test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
+          SERVICE="$(systemctl is-active imds-marketing 2>/dev/null || true)"
+          INFO="$(curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info)"
+          HEALTH_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:8787/api/health || true)"
+          BILLING_URL="$(systemctl cat imds-marketing | sed -n 's/^Environment=IMDS_BILLING_CONTROL_URL=//p' | tail -n1)"
+          CURRENT_TARGET="$(readlink -f /opt/imds-marketing/current 2>/dev/null || true)"
+          printf 'service=%s\n' "$SERVICE"
+          printf 'info=%s\n' "$INFO"
+          printf 'health_code=%s\n' "$HEALTH_CODE"
+          printf 'billing_url=%s\n' "$BILLING_URL"
+          printf 'current_target=%s\n' "$CURRENT_TARGET"
+          REMOTE
+          )"
+          printf '%s\n' "$OUTPUT"
+          SERVICE="$(printf '%s\n' "$OUTPUT" | sed -n 's/^service=//p')"
+          INFO="$(printf '%s\n' "$OUTPUT" | sed -n 's/^info=//p')"
+          HEALTH_CODE="$(printf '%s\n' "$OUTPUT" | sed -n 's/^health_code=//p')"
+          BILLING_URL="$(printf '%s\n' "$OUTPUT" | sed -n 's/^billing_url=//p')"
+          CURRENT_TARGET="$(printf '%s\n' "$OUTPUT" | sed -n 's/^current_target=//p')"
+          PROTOCOL="$(printf '%s' "$INFO" | jq -r '.protocol // 0')"
+          MODE="$(printf '%s' "$INFO" | jq -r '.entitlementMode // "unknown"')"
+          {
+            echo "service=$SERVICE"
+            echo "protocol=$PROTOCOL"
+            echo "mode=$MODE"
+            echo "health_code=$HEALTH_CODE"
+            echo "billing_url=$BILLING_URL"
+            echo "current_target=$CURRENT_TARGET"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish live runtime status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVICE: ${{ steps.probe.outputs.service }}
+          PROTOCOL: ${{ steps.probe.outputs.protocol }}
+          MODE: ${{ steps.probe.outputs.mode }}
+          HEALTH_CODE: ${{ steps.probe.outputs.health_code }}
+          BILLING_URL: ${{ steps.probe.outputs.billing_url }}
+          CURRENT_TARGET: ${{ steps.probe.outputs.current_target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          state=failure
+          description="Marketing runtime probe failed"
+          if [ "$SERVICE" = active ] && [ "$HEALTH_CODE" = 200 ] && [ "$PROTOCOL" = 4 ] && [ "$MODE" = fail-closed-managed-organization-scope ] && [ "$BILLING_URL" = http://127.0.0.1:8788 ]; then
+            state=success
+            description="Marketing protocol 4 live; Control Center billing active"
+          elif [ -n "$PROTOCOL" ]; then
+            description="Marketing live: protocol=$PROTOCOL mode=$MODE service=$SERVICE health=$HEALTH_CODE"
+          fi
+          description=$(printf '%s' "$description" | cut -c1-130)
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$(jq -nc --arg state "$state" --arg context 'imdssa/marketing-runtime-probe' --arg description "$description" '{state:$state,context:$context,description:$description}')" >/dev/null
+          printf 'service=%s protocol=%s mode=%s health=%s billing=%s release=%s\n' "$SERVICE" "$PROTOCOL" "$MODE" "$HEALTH_CODE" "$BILLING_URL" "$CURRENT_TARGET"
