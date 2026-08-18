@@ -1,0 +1,94 @@
+name: Probe Payment Readiness
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/probe-payment-readiness.yml
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: probe-payment-readiness
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Probe payment stack without creating charges
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          OUTPUT="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          API=http://127.0.0.1:8788
+          API_ACTIVE="$(systemctl is-active imds-super-admin-api.service 2>/dev/null || true)"
+          API_HEALTH="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$API/healthz" || true)"
+
+          CLOUD_CONFIGURED=false
+          if [ -r /etc/imds-cloudpayments.env ]; then
+            set -a
+            source /etc/imds-cloudpayments.env
+            set +a
+            if [ -n "${CLOUDPAYMENTS_PUBLIC_ID:-}" ] && [ -n "${CLOUDPAYMENTS_API_SECRET:-}" ]; then CLOUD_CONFIGURED=true; fi
+          fi
+
+          PRODUCT_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.products where code='imds-marketing' limit 1")"
+          test -n "$PRODUCT_ID"
+          PUBLISHED_PLANS="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select count(*) from app.product_plans where product_id='$PRODUCT_ID'::uuid and status='published'")"
+          PRICED_PLANS="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select count(distinct p.id) from app.product_plans p join app.product_plan_prices pp on pp.plan_id=p.id where p.product_id='$PRODUCT_ID'::uuid and p.status='published' and pp.amount_kzt>0")"
+          PAYMENT_METHODS="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select count(*) from app.product_payment_methods where product_id='$PRODUCT_ID'::uuid and enabled=true")"
+          SUBSCRIPTIONS="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select count(*) from app.product_subscriptions where product_id='$PRODUCT_ID'::uuid")"
+
+          WEBHOOK_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -X POST -H 'content-type: application/x-www-form-urlencoded' --data 'InvoiceId=invalid' "$API/api/webhooks/cloudpayments/pay" || true)"
+          PROVIDER_FEED_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -X POST -H 'content-type: application/json' --data '{}' "$API/internal/billing/provider-payments" || true)"
+
+          printf 'api_active=%s\napi_health=%s\ncloud=%s\npublished_plans=%s\npriced_plans=%s\npayment_methods=%s\nsubscriptions=%s\nwebhook_code=%s\nprovider_feed_code=%s\n' \
+            "$API_ACTIVE" "$API_HEALTH" "$CLOUD_CONFIGURED" "$PUBLISHED_PLANS" "$PRICED_PLANS" "$PAYMENT_METHODS" "$SUBSCRIPTIONS" "$WEBHOOK_CODE" "$PROVIDER_FEED_CODE"
+          REMOTE
+          )"
+          printf '%s\n' "$OUTPUT"
+          value() { printf '%s\n' "$OUTPUT" | sed -n "s/^$1=//p"; }
+          api_active="$(value api_active)"
+          api_health="$(value api_health)"
+          cloud="$(value cloud)"
+          published="$(value published_plans)"
+          priced="$(value priced_plans)"
+          methods="$(value payment_methods)"
+          subscriptions="$(value subscriptions)"
+          webhook="$(value webhook_code)"
+          provider_feed="$(value provider_feed_code)"
+          post() {
+            local context="$1" state="$2" description="$3"
+            curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+              -d "$(jq -nc --arg state "$state" --arg context "$context" --arg description "$description" '{state:$state,context:$context,description:$description}')" >/dev/null
+          }
+          [ "$api_active" = active ] && [ "$api_health" = 200 ] && post imdssa/payment-api success 'Control Center billing API healthy' || post imdssa/payment-api failure "api=$api_active health=$api_health"
+          [ "$cloud" = true ] && post imdssa/cloudpayments-config success 'CloudPayments credentials configured on VPS' || post imdssa/cloudpayments-config failure 'CloudPayments credentials missing'
+          [ "${published:-0}" -gt 0 ] && [ "${priced:-0}" -gt 0 ] && post imdssa/payment-plans success "published=$published priced=$priced" || post imdssa/payment-plans failure "published=$published priced=$priced"
+          [ "${methods:-0}" -gt 0 ] && post imdssa/payment-methods success "enabled methods=$methods" || post imdssa/payment-methods failure 'No enabled payment methods'
+          [ "$webhook" = 401 ] && [ "$provider_feed" = 401 ] && post imdssa/payment-webhook-security success 'Unsigned provider callbacks rejected' || post imdssa/payment-webhook-security failure "cloud=$webhook feed=$provider_feed"
+          if [ "$api_active" = active ] && [ "$api_health" = 200 ] && [ "$cloud" = true ] && [ "${published:-0}" -gt 0 ] && [ "${priced:-0}" -gt 0 ] && [ "${methods:-0}" -gt 0 ] && [ "$webhook" = 401 ] && [ "$provider_feed" = 401 ]; then
+            post imdssa/payment-readiness success 'Billing checkout stack ready; no charge created'
+          else
+            post imdssa/payment-readiness failure 'Billing checkout stack needs configuration'
+          fi
