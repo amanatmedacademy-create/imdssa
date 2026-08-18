@@ -18,7 +18,8 @@ import {
 import { OverviewPage } from './overview/OverviewPage';
 import { OrganizationsPage } from './organizations/OrganizationsPage';
 import { ProductsPage } from './products/ProductsPage';
-import type { ControlCenterTab, ControlCommand, Installation, Organization, OrganizationProduct, Overview, Product, RealtimeState, User } from '../controlCenter';
+import { ModulesPage } from './modules/ModulesPage';
+import type { ControlCenterTab, ControlCommand, Installation, Module, Organization, OrganizationProduct, Overview, Product, RealtimeState, User } from '../controlCenter';
 import { api } from '../controlCenter';
 import './controlCenterV2.css';
 
@@ -42,9 +43,8 @@ const administrationNavigation: NavigationItem[] = [
   { id: 'settings', label: 'Настройки', description: 'Уведомления и defaults', icon: Settings2 },
 ];
 
-const moduleSpecs: Record<Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products'>, { kicker: string; title: string; text: string; fields: string[] }> = {
+const moduleSpecs: Record<Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products' | 'modules'>, { kicker: string; title: string; text: string; fields: string[] }> = {
   registrations: { kicker: 'ONBOARDING', title: 'Регистрации', text: 'Входящие регистрации из продуктов до создания или связывания организации.', fields: ['Источник регистрации', 'Компания и владелец', 'Контакты', 'Trial', 'Дата регистрации', 'Статус обработки'] },
-  modules: { kicker: 'ENTITLEMENTS', title: 'Модули', text: 'Каталог возможностей продуктов и фактический доступ организаций.', fields: ['Категория и версия', 'Владелец-продукт', 'Commercial role', 'Цена add-on', 'Установки', 'Desired / actual state'] },
   subscriptions: { kicker: 'COMMERCIAL ACCESS', title: 'Подписки', text: 'Центральный источник истины для тарифов, периодов и lifecycle доступа.', fields: ['Организация и продукт', 'Тариф', '1 / 3 / 6 / 12 месяцев', 'Add-ons', 'Trial / Active / Past Due', 'Current period / access end'] },
   billing: { kicker: 'FINANCE', title: 'Биллинг', text: 'Счета, фактические оплаты, возвраты и сверка.', fields: ['Открытые счета', 'Дебиторка', 'Просрочка', 'Платежи', 'Возвраты', 'Reconciliation'] },
   sync: { kicker: 'CONTROL COMMANDS', title: 'Синхронизация', text: 'Доставка desired state из Control Center в продуктовые runtime.', fields: ['Organization / product', 'Desired revision', 'Actual revision', 'Pending / applying / synced', 'Attempts', 'Последняя ошибка'] },
@@ -54,7 +54,7 @@ const moduleSpecs: Record<Exclude<ControlCenterTab, 'overview' | 'organizations'
   settings: { kicker: 'CONTROL CENTER', title: 'Настройки', text: 'Бизнес-настройки Control Center без серверных secrets.', fields: ['Telegram уведомления', 'Notification routing', 'Commercial defaults', 'Trial defaults', 'Системные параметры', 'Audit изменений'] },
 };
 
-function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products'>; onOpenLegacy: () => void }) {
+function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products' | 'modules'>; onOpenLegacy: () => void }) {
   const spec = moduleSpecs[tab];
   return <section className="ccv2-module">
     <div className="ccv2-module-intro"><div><span>{spec.kicker}</span><h2>{spec.title}</h2><p>{spec.text}</p></div><button type="button" onClick={onOpenLegacy}>Открыть текущий рабочий экран</button></div>
@@ -65,7 +65,6 @@ function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, '
 
 const legacyTabIndex: Partial<Record<ControlCenterTab, number>> = {
   registrations: 2,
-  modules: 4,
   subscriptions: 1,
   billing: 1,
   sync: 6,
@@ -80,6 +79,7 @@ export function ControlCenterV2() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [modules, setModules] = useState<Module[]>([]);
   const [installations, setInstallations] = useState<Installation[]>([]);
   const [organizationProducts, setOrganizationProducts] = useState<OrganizationProduct[]>([]);
   const [commands, setCommands] = useState<ControlCommand[]>([]);
@@ -91,10 +91,11 @@ export function ControlCenterV2() {
     const me = await api<{ user: User }>('/api/auth/me');
     setUser(me.user);
     const root = me.user.scope === 'tenant' ? '/api/tenant/v1' : '/api/v1';
-    const [snapshot, orgs, productList, installationList, organizationProductList, commandList] = await Promise.all([
+    const [snapshot, orgs, productList, moduleList, installationList, organizationProductList, commandList] = await Promise.all([
       api<Overview>(`${root}/overview`),
       api<{ items: Organization[] }>(`${root}/organizations`),
       api<{ items: Product[] }>(`${root}/products`),
+      api<{ items: Module[] }>(`${root}/modules`),
       api<{ items: Installation[] }>(`${root}/installations`),
       api<{ items: OrganizationProduct[] }>(`${root}/organization-products`),
       api<{ items: ControlCommand[] }>(`${root}/control-commands`),
@@ -102,6 +103,7 @@ export function ControlCenterV2() {
     setOverview(snapshot);
     setOrganizations(orgs.items);
     setProducts(productList.items);
+    setModules(moduleList.items);
     setInstallations(installationList.items);
     setOrganizationProducts(organizationProductList.items);
     setCommands(commandList.items);
@@ -147,7 +149,8 @@ export function ControlCenterV2() {
       {tab === 'overview' && <OverviewPage overview={overview} organizations={organizations} products={products} installations={installations} commands={commands} realtimeState={realtimeState} onRefresh={() => void refresh()} onNavigate={(target) => setTab(target)} />}
       {tab === 'organizations' && <OrganizationsPage user={user} organizations={organizations} organizationProducts={organizationProducts} installations={installations} canManage={canManage} onChanged={refresh} onNavigate={setTab} />}
       {tab === 'products' && <ProductsPage user={user} products={products} organizationProducts={organizationProducts} installations={installations} canManage={canManage} />}
-      {tab !== 'overview' && tab !== 'organizations' && tab !== 'products' && <ModuleLanding tab={tab} onOpenLegacy={() => openLegacy(tab)} />}
+      {tab === 'modules' && <ModulesPage user={user} modules={modules} products={products} organizations={organizations} installations={installations} canManage={canManage} onChanged={refresh} onNavigateSync={() => setTab('sync')} />}
+      {tab !== 'overview' && tab !== 'organizations' && tab !== 'products' && tab !== 'modules' && <ModuleLanding tab={tab} onOpenLegacy={() => openLegacy(tab)} />}
     </main>
   </div>;
 }
