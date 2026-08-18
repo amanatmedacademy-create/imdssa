@@ -1,0 +1,12 @@
+[Unit]
+Description=Run IMDS subscription lifecycle refresh every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+AccuracySec=30s
+Unit=imdssa-subscription-lifecycle.service
+
+[Install]
+WantedBy=timers.target
