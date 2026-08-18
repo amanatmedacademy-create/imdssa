@@ -59,13 +59,16 @@ export async function handleBillingReconciliationApi(args: { req: IncomingMessag
 
   if (url.pathname === '/api/v1/billing/refunds' && method === 'GET') {
     const organizationId = text(url.searchParams.get('organizationId'));
+    const values: unknown[] = [];
+    let where = '';
+    if (organizationId) { values.push(organizationId); where = 'where r.organization_id=$1::uuid'; }
     const result = await pool.query(`select r.*,p.payment_number,p.method payment_method,i.invoice_number,o.name organization_name
       from app.billing_refunds r
       join app.billing_payments p on p.id=r.payment_id
       join app.billing_invoices i on i.id=r.invoice_id
       join app.organizations o on o.id=r.organization_id
-      where ($1='' or r.organization_id=$1::uuid)
-      order by r.received_at desc,r.created_at desc limit 500`, [organizationId]);
+      ${where}
+      order by r.received_at desc,r.created_at desc limit 500`, values);
     json(res,200,{items:result.rows}); return true;
   }
 
