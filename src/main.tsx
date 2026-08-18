@@ -8,21 +8,28 @@ import { OrganizationSubscriptionBridge } from './features/subscriptions/Organiz
 import './notifications.css';
 import { installControlCenterBranding } from './vps/branding';
 import { InfrastructureCenter } from './vps/InfrastructureCenter';
+import { OverviewPreviewApp } from './vps/pages/overview/OverviewPreviewApp';
 import { VpsApp } from './vps/VpsApp';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Root element is missing');
 
 installControlCenterBranding(rootElement);
-ReactDOM.createRoot(rootElement).render(
-  <>
-    <VpsApp />
-    <InfrastructureCenter />
-    <NotificationBell />
-    <UserAccessOverlay />
-    <ProductCommercialBridge />
-    <OrganizationSubscriptionBridge />
-    <VpsBillingBridge />
-    <SessionManagementBridge />
-  </>,
-);
+const root = ReactDOM.createRoot(rootElement);
+
+if (window.location.pathname === '/overview-v2') {
+  root.render(<OverviewPreviewApp />);
+} else {
+  root.render(
+    <>
+      <VpsApp />
+      <InfrastructureCenter />
+      <NotificationBell />
+      <UserAccessOverlay />
+      <ProductCommercialBridge />
+      <OrganizationSubscriptionBridge />
+      <VpsBillingBridge />
+      <SessionManagementBridge />
+    </>,
+  );
+}
