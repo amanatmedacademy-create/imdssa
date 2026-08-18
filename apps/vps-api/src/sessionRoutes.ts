@@ -1,7 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
 import { hashToken } from './security.js';
-import type { PlatformUser } from './tenantAccess.js';
 
 type JsonResponder = (res: ServerResponse, status: number, body: unknown) => void;
 
@@ -11,7 +10,7 @@ type Context = {
   pool: Pool;
   url: URL;
   method: string;
-  user: PlatformUser;
+  user: { id: string };
   json: JsonResponder;
 };
 
