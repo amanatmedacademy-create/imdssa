@@ -8,6 +8,7 @@ WEB_ROOT=/var/www/imds-super-admin
 API_DIR="$APP_DIR/api"
 ENV_DIR=/etc/imds-super-admin
 CONTROL_ENV=/etc/imds-platform-control.env
+PROVIDER_ENV=/etc/imds-billing-provider.env
 CONTROL_GROUP=imds-platform
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -21,6 +22,8 @@ usermod -a -G "$CONTROL_GROUP" imdssa
 if id imds >/dev/null 2>&1; then usermod -a -G "$CONTROL_GROUP" imds; fi
 if [ ! -f "$CONTROL_ENV" ]; then umask 027; printf 'IMDS_PLATFORM_CONTROL_TOKEN=%s\n' "$(openssl rand -hex 48)" > "$CONTROL_ENV"; fi
 chown root:"$CONTROL_GROUP" "$CONTROL_ENV"; chmod 0640 "$CONTROL_ENV"
+if [ ! -f "$PROVIDER_ENV" ]; then umask 027; printf 'IMDS_BILLING_PROVIDER_TOKEN=%s\n' "$(openssl rand -hex 48)" > "$PROVIDER_ENV"; fi
+chown root:imdssa "$PROVIDER_ENV"; chmod 0640 "$PROVIDER_ENV"
 install -d -o root -g root -m 0755 "$APP_DIR"
 install -d -o imdssa -g imdssa -m 0750 "$API_DIR"
 install -d -m 0755 "$WEB_ROOT/releases/$RELEASE_SHA"
@@ -72,6 +75,7 @@ WorkingDirectory=/opt/imds-super-admin/api
 EnvironmentFile=/etc/imds-super-admin/postgres.env
 EnvironmentFile=/etc/imds-super-admin/api.env
 EnvironmentFile=/etc/imds-platform-control.env
+EnvironmentFile=/etc/imds-billing-provider.env
 EnvironmentFile=-/etc/imds-super-admin/telegram.env
 EnvironmentFile=-/etc/imds-cloudpayments.env
 ExecStart=/usr/bin/node /opt/imds-super-admin/api/dist/index.js
