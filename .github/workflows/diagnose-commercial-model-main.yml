@@ -35,14 +35,21 @@ jobs:
           if [ $rc -eq 0 ]; then
             sudo apt-get update >/dev/null 2>&1 && sudo apt-get install -y sshpass >/dev/null 2>&1
             export SSHPASS="$VPS_PASSWORD"
-            sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$VPS_USER@$VPS_HOST" 'sudo bash -s' >>/tmp/diag.log 2>&1 <<'REMOTE'
+            success=''
+            for _ in $(seq 1 60); do
+              if sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$VPS_USER@$VPS_HOST" 'sudo bash -s' >>/tmp/diag.log 2>&1 <<'REMOTE'
           set -euo pipefail
           systemctl is-active --quiet imds-super-admin-api.service
           test "$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.product_limit_catalog') is not null and to_regclass('app.product_module_prices') is not null and to_regclass('app.product_plan_revisions') is not null")" = t
           test "$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select exists(select 1 from app.modules where code='marketing.ai' and status='published')")" = t
           test "$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select commercial_role from app.product_module_commercial c join app.modules m on m.id=c.module_id where m.code='marketing.voice-transcription' limit 1")" = feature
           grep -R -q 'Здесь только продукты' /var/www/imds-super-admin/current/assets
+          grep -R -q 'Коммерческий модуль' /var/www/imds-super-admin/current/assets
           REMOTE
+              then success=1; break; fi
+              sleep 5
+            done
+            test "$success" = 1
             rc=$?
           fi
           mkdir -p docs/internal
@@ -55,4 +62,4 @@ jobs:
           git pull --rebase origin main
           git push origin HEAD:main
           exit 0
-# rerun after session management stylesheet fix
+# rerun with production convergence wait
