@@ -143,10 +143,17 @@ export async function handleInternalRegistrationEvent(req: IncomingMessage, res:
 
     const product = await client.query<{ id: string }>('select id from app.products where code=$1 limit 1', [event.trial.productCode]);
     if (product.rowCount) {
+      const productId = product.rows[0].id;
       await client.query(`insert into app.organization_products(organization_id,product_id,status,config)
         values($1,$2,'active'::app.installation_status,jsonb_build_object('subscriptionStatus',$3::text,'trialStartsAt',$4::text,'trialEndsAt',$5::text,'source','registration'))
         on conflict(organization_id,product_id) do update set status='active'::app.installation_status,config=app.organization_products.config || excluded.config,updated_at=now()`,
-      [organizationId, product.rows[0].id, event.trial.status, event.trial.startsAt, event.trial.endsAt]);
+      [organizationId, productId, event.trial.status, event.trial.startsAt, event.trial.endsAt]);
+      await client.query(`insert into app.product_subscriptions(
+        organization_id,product_id,status,billing_period_months,currency,trial_started_at,trial_ends_at,access_ends_at,plan_snapshot,metadata)
+        values($1,$2,case when $4::timestamptz>now() then 'trial' else 'expired' end,1,'KZT',$3::timestamptz,$4::timestamptz,$4::timestamptz,
+          jsonb_build_object('registrationTrial',true,'days',$5::int),jsonb_build_object('source','registration','eventId',$6::text))
+        on conflict(organization_id,product_id) do nothing`,
+      [organizationId, productId, event.trial.startsAt, event.trial.endsAt, event.trial.days, event.eventId]);
     }
     await client.query(`insert into app.realtime_events(topic,event_type,organization_id,payload)
       values('registration_notifications','organization.registered',$1,$2::jsonb)`, [organizationId, JSON.stringify({ notificationId, ...event })]);
