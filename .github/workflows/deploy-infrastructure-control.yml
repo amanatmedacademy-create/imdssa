@@ -21,7 +21,6 @@ env:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -47,6 +46,15 @@ jobs:
       - run: npm run lint --workspace @imds/infra-api
       - run: npm run build --workspace @imds/infra-api
       - run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Confirm control-plane release reached VPS
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo grep -q 'location /infra-api/' /etc/nginx/sites-available/imds-super-admin && test -f /var/www/imds-super-admin/current/index.html"
 
       - name: Stage infrastructure API
         run: |
