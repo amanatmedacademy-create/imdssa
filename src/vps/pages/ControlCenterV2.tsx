@@ -24,6 +24,7 @@ import { BillingPage } from './billing/BillingPage';
 import { SyncPage } from './sync/SyncPage';
 import { EventsPage, type RealtimeFeedEvent } from './events/EventsPage';
 import { UsersPage } from './users/UsersPage';
+import { SecurityPage } from './security/SecurityPage';
 import type { ControlCenterTab, ControlCommand, Installation, Module, Organization, OrganizationProduct, Overview, Product, RealtimeState, User } from '../controlCenter';
 import { api } from '../controlCenter';
 import './controlCenterV2.css';
@@ -48,13 +49,12 @@ const administrationNavigation: NavigationItem[] = [
   { id: 'settings', label: 'Настройки', description: 'Уведомления и defaults', icon: Settings2 },
 ];
 
-const moduleSpecs: Record<Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events' | 'users'>, { kicker: string; title: string; text: string; fields: string[] }> = {
+const moduleSpecs: Record<Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events' | 'users' | 'security'>, { kicker: string; title: string; text: string; fields: string[] }> = {
   registrations: { kicker: 'ONBOARDING', title: 'Регистрации', text: 'Входящие регистрации из продуктов до создания или связывания организации.', fields: ['Источник регистрации', 'Компания и владелец', 'Контакты', 'Trial', 'Дата регистрации', 'Статус обработки'] },
-  security: { kicker: 'SECURITY', title: 'Безопасность', text: 'Управление сессиями, паролями и событиями доступа.', fields: ['Активные устройства', 'IP / user agent', 'Последняя активность', 'Истечение сессии', 'Login attempts', 'Смена пароля'] },
   settings: { kicker: 'CONTROL CENTER', title: 'Настройки', text: 'Бизнес-настройки Control Center без серверных secrets.', fields: ['Telegram уведомления', 'Notification routing', 'Commercial defaults', 'Trial defaults', 'Системные параметры', 'Audit изменений'] },
 };
 
-function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events' | 'users'>; onOpenLegacy: () => void }) {
+function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events' | 'users' | 'security'>; onOpenLegacy: () => void }) {
   const spec = moduleSpecs[tab];
   return <section className="ccv2-module">
     <div className="ccv2-module-intro"><div><span>{spec.kicker}</span><h2>{spec.title}</h2><p>{spec.text}</p></div><button type="button" onClick={onOpenLegacy}>Открыть текущий рабочий экран</button></div>
@@ -65,7 +65,6 @@ function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, '
 
 const legacyTabIndex: Partial<Record<ControlCenterTab, number>> = {
   registrations: 2,
-  security: 8,
   settings: 9,
 };
 
@@ -164,7 +163,8 @@ export function ControlCenterV2() {
       {tab === 'sync' && <SyncPage organizationProducts={organizationProducts} commands={commands} canManage={canManage} onChanged={refresh} />}
       {tab === 'events' && <EventsPage user={user} realtimeEvents={realtimeEvents} commands={commands} organizations={organizations} products={products} realtimeState={realtimeState} />}
       {tab === 'users' && <UsersPage user={user} organizations={organizations} products={products} modules={modules} />}
-      {tab !== 'overview' && tab !== 'organizations' && tab !== 'products' && tab !== 'modules' && tab !== 'subscriptions' && tab !== 'billing' && tab !== 'sync' && tab !== 'events' && tab !== 'users' && <ModuleLanding tab={tab} onOpenLegacy={() => openLegacy(tab)} />}
+      {tab === 'security' && <SecurityPage user={user} />}
+      {tab !== 'overview' && tab !== 'organizations' && tab !== 'products' && tab !== 'modules' && tab !== 'subscriptions' && tab !== 'billing' && tab !== 'sync' && tab !== 'events' && tab !== 'users' && tab !== 'security' && <ModuleLanding tab={tab} onOpenLegacy={() => openLegacy(tab)} />}
     </main>
   </div>;
 }
