@@ -34,10 +34,10 @@ cp /etc/systemd/system/imdssa-billing-reconciliation.timer "$STAGE/billing-recon
 [ -f "$BASE/local-release-runner.sh" ] && cp "$BASE/local-release-runner.sh" "$STAGE/local-release-runner.sh"
 [ -f "$BASE/snapshot-control-plane.sh" ] && cp "$BASE/snapshot-control-plane.sh" "$STAGE/snapshot-control-plane.sh"
 
-# Recovery snapshots include database dumps. They are not restored automatically during
-# application rollback; an operator can use them for disaster recovery if schema/data
-# also need to be returned to this point in time.
-sudo -u postgres pg_dump --format=custom --no-owner --no-acl --file="$BACKUP/imdssa.dump" imdssa
+# Root opens the destination file before pg_dump drops to the postgres user. This avoids
+# permission failures when the recovery directory is root-owned while the dump itself is
+# still produced by PostgreSQL's service account.
+sudo -u postgres pg_dump --format=custom --no-owner --no-acl imdssa > "$BACKUP/imdssa.dump"
 
 MARKETING_DB_BACKED_UP=false
 if command -v docker >/dev/null 2>&1 && docker inspect imds-postgres >/dev/null 2>&1; then
