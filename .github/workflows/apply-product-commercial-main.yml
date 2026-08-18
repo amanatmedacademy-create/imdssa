@@ -1,0 +1,58 @@
+name: Apply Product Commercial Main
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/apply-product-commercial-main.py'
+      - '.github/workflows/apply-product-commercial-main.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-product-commercial-main
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply product commercial integration
+        run: python3 scripts/apply-product-commercial-main.py
+      - name: Validate API and frontend
+        env:
+          VITE_RUNTIME: vps
+          VITE_APP_ENV: production
+          VITE_APP_VERSION: 0.8.0
+          IMDS_STRICT_ENV: 'true'
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run lint --workspace @imds/vps-api
+          npm run build --workspace @imds/vps-api
+          npm run lint
+          npm run build
+      - name: Commit integration to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'IMDS Automation'
+          git config user.email 'automation@imds.local'
+          git add apps/vps-api/src/index.ts src/vps/VpsApp.tsx deploy/vps/deploy-control-plane.sh .github/workflows/deploy-vps-control-plane.yml
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'No integration changes to commit'
+          else
+            git commit -m 'integrate product tariffs and pricing into Control Center'
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
