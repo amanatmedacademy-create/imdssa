@@ -104,15 +104,16 @@ export async function handleSubscriptionApi(args: { req: IncomingMessage; res: S
         coalesce((select jsonb_object_agg(months::text,amount_kzt order by months) from app.product_plan_prices where plan_id=p.id),'{}'::jsonb) prices
         from app.product_plans p where p.id=$1 and p.product_id=$2`, [planId,productId,months]);
       if (!planResult.rowCount) { await client.query('rollback'); json(res,400,{error:'PLAN_NOT_FOUND_FOR_PRODUCT'}); return true; }
-      plan = planResult.rows[0];
-      if (String(plan.status) === 'archived' || (String(plan.status) !== 'published' && !canAssignDraft(user))) { await client.query('rollback'); json(res,409,{error:'PLAN_NOT_ASSIGNABLE'}); return true; }
-      if (String(plan.pricing_mode) === 'fixed') {
-        basePrice = numberOrNull(plan.period_price);
+      const loadedPlan = planResult.rows[0] as Record<string, unknown>;
+      plan = loadedPlan;
+      if (String(loadedPlan.status) === 'archived' || (String(loadedPlan.status) !== 'published' && !canAssignDraft(user))) { await client.query('rollback'); json(res,409,{error:'PLAN_NOT_ASSIGNABLE'}); return true; }
+      if (String(loadedPlan.pricing_mode) === 'fixed') {
+        basePrice = numberOrNull(loadedPlan.period_price);
         if (basePrice == null) { await client.query('rollback'); json(res,409,{error:'PLAN_PRICE_NOT_CONFIGURED_FOR_PERIOD'}); return true; }
       } else if (customPrice == null && status !== 'free' && status !== 'beta' && status !== 'trial') {
         await client.query('rollback'); json(res,409,{error:'CUSTOM_PRICE_REQUIRED_FOR_REQUEST_PLAN'}); return true;
       }
-      limits = plan.limits && typeof plan.limits === 'object' && !Array.isArray(plan.limits) ? plan.limits as Record<string,unknown> : {};
+      limits = loadedPlan.limits && typeof loadedPlan.limits === 'object' && !Array.isArray(loadedPlan.limits) ? loadedPlan.limits as Record<string,unknown> : {};
       const modulesResult = await client.query<PlanModule>(`select module_id,mode,price_override_kzt from app.product_plan_modules where plan_id=$1`, [planId]);
       planModules = modulesResult.rows;
     }
@@ -123,6 +124,9 @@ export async function handleSubscriptionApi(args: { req: IncomingMessage; res: S
     }
 
     const included = new Set(planModules.filter((item) => item.mode === 'included').map((item) => item.module_id));
+    if (selectedAddons.some((moduleId) => included.has(moduleId))) {
+      await client.query('rollback'); json(res,409,{error:'INVALID_ADDON_SELECTION'}); return true;
+    }
     const addonCandidates = await client.query(`select m.id,m.code,m.name,c.separately_sellable,c.commercial_role,
       (select amount_kzt from app.product_module_prices mp where mp.product_id=$1 and mp.module_id=m.id and mp.months=$3) period_price
       from app.modules m join app.product_module_commercial c on c.product_id=$1 and c.module_id=m.id
