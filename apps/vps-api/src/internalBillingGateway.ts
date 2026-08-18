@@ -116,9 +116,9 @@ async function checkout(pool: Pool, target: Record<string, unknown>, payload: Js
     const periodStart = subscription.current_period_end && new Date(subscription.current_period_end)>now ? new Date(subscription.current_period_end) : now;
     const periodEnd = new Date(periodStart); periodEnd.setUTCMonth(periodEnd.getUTCMonth()+months);
     const snapshot = { pendingPlanId:plan.id,pendingPlanCode:plan.code,pendingPlanRevision:plan.revision,pendingBillingPeriodMonths:months,pendingLimits:plan.limits,source:'marketing_self_service' };
-    const inserted = await client.query<{id:string}>(`insert into app.billing_invoices(billing_account_id,organization_id,subscription_id,invoice_number,status,currency,subtotal_kzt,total_kzt,period_start,period_end,issued_at,due_at,pricing_snapshot,metadata)
-      values($1,$2,$3,$4,'issued','KZT',$5,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb) returning id`,
-      [accountId,target.organization_id,subscription.id,invoiceNumber,price,periodStart.toISOString(),periodEnd.toISOString(),now.toISOString(),dueAt.toISOString(),JSON.stringify(snapshot),JSON.stringify({source:'marketing_self_service'})]);
+    const inserted = await client.query<{id:string}>(`insert into app.billing_invoices(billing_account_id,organization_id,subscription_id,invoice_number,status,currency,subtotal_kzt,total_kzt,period_start,period_end,issued_at,due_at,pricing_snapshot)
+      values($1,$2,$3,$4,'issued','KZT',$5,$5,$6,$7,$8,$9,$10::jsonb) returning id`,
+      [accountId,target.organization_id,subscription.id,invoiceNumber,price,periodStart.toISOString(),periodEnd.toISOString(),now.toISOString(),dueAt.toISOString(),JSON.stringify(snapshot)]);
     const invoiceId = inserted.rows[0].id;
     await client.query(`insert into app.billing_invoice_lines(invoice_id,line_type,product_id,description,quantity,unit_price_kzt,line_total_kzt,metadata)
       values($1,'subscription',$2,$3,1,$4,$4,$5::jsonb)`, [invoiceId,target.product_id,`${target.product_name} · ${plan.name} · ${months} мес.`,price,JSON.stringify({planCode:plan.code,months})]);
