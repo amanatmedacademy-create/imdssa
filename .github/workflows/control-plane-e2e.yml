@@ -7,11 +7,12 @@ on:
     paths:
       - '.github/workflows/control-plane-e2e.yml'
       - 'scripts/verify-sessions-control-e2e.sh'
+      - 'scripts/verify-marketing-fail-closed.sh'
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_USER: ${{ secrets.VPS_USER }}
@@ -33,3 +34,12 @@ jobs:
           export SSHPASS
           SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20)
           sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' < scripts/verify-sessions-control-e2e.sh
+      - name: Verify Marketing managed-tenant fail-closed behavior
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' < scripts/verify-marketing-fail-closed.sh
