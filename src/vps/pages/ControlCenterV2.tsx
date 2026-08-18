@@ -7,6 +7,7 @@ import {
   CreditCard,
   FileCheck2,
   Layers3,
+  LogOut,
   PackageCheck,
   ServerCog,
   Settings2,
@@ -63,6 +64,7 @@ export function ControlCenterV2() {
   const [realtimeEvents, setRealtimeEvents] = useState<RealtimeFeedEvent[]>([]);
   const [realtimeState, setRealtimeState] = useState<RealtimeState>('connecting');
   const [loading, setLoading] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState('');
 
   const refresh = useCallback(async () => {
@@ -115,17 +117,32 @@ export function ControlCenterV2() {
   const visibleAdministration = useMemo(() => user?.scope === 'tenant' ? administrationNavigation.filter((item) => item.id !== 'settings') : administrationNavigation, [user?.scope]);
   const canManage = Boolean(user?.scope === 'platform' && ['platform_owner', 'platform_admin'].includes(user.role));
 
+  const logout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await api('/api/auth/logout', { method: 'POST', body: '{}' });
+    } catch {
+      // Reloading still forces the auth boundary to re-check the server session.
+    } finally {
+      window.location.replace('/');
+    }
+  };
+
   if (loading) return <main className="ccv2-state">Загрузка Control Center…</main>;
   if (!user) return <main className="ccv2-state"><strong>Требуется авторизация</strong><a href="/">Перейти ко входу</a></main>;
 
   const selected = [...businessNavigation, ...administrationNavigation].find((item) => item.id === tab) ?? businessNavigation[0];
   return <div className="ccv2-shell">
     <aside className="ccv2-sidebar">
-      <div className="ccv2-brand"><b>IMDS</b><span>Control Center v2</span></div>
-      <div className="ccv2-nav-group"><span>ПРОДУКТЫ И КЛИЕНТЫ</span>{visibleBusiness.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={17} />{label}</button>)}</div>
-      <div className="ccv2-nav-group"><span>АДМИНИСТРИРОВАНИЕ</span>{visibleAdministration.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={17} />{label}</button>)}</div>
+      <div className="ccv2-brand"><b>IMDS</b><span>Control Center</span></div>
+      <div className="ccv2-nav-group"><span>ПРОДУКТЫ И КЛИЕНТЫ</span>{visibleBusiness.map(({ id, label, icon: Icon }) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={17} />{label}</button>)}</div>
+      <div className="ccv2-nav-group"><span>АДМИНИСТРИРОВАНИЕ</span>{visibleAdministration.map(({ id, label, icon: Icon }) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={17} />{label}</button>)}</div>
       {user.scope === 'platform' && <div className="ccv2-nav-group ccv2-infra-link"><span>СЕРВЕР</span><a href="/infrastructure"><ServerCog size={17} />Инфраструктура</a><small>Отдельный технический контур</small></div>}
-      <div className="ccv2-profile"><strong>{user.fullName}</strong><span>{user.email}</span><a href="/">Control Center</a></div>
+      <div className="ccv2-profile">
+        <div className="ccv2-profile-copy"><strong>{user.fullName}</strong><span>{user.email}</span><small>{user.scope} · {user.role}</small></div>
+        <button type="button" className="ccv2-logout" disabled={loggingOut} onClick={() => void logout()}><LogOut size={14}/>{loggingOut ? 'Выход…' : 'Выйти'}</button>
+      </div>
     </aside>
     <main className="ccv2-main">
       <header className="ccv2-header"><div><span>IMDS CONTROL CENTER</span><h1>{selected.label}</h1><p>{selected.description}</p></div><div className={`ccv2-live ${realtimeState}`}><i />{realtimeState === 'online' ? 'Realtime' : realtimeState === 'connecting' ? 'Connecting' : 'Offline'}</div></header>
