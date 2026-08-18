@@ -1,0 +1,12 @@
+[Unit]
+Description=Run IMDS billing reconciliation every 15 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+Persistent=true
+AccuracySec=1min
+Unit=imdssa-billing-reconciliation.service
+
+[Install]
+WantedBy=timers.target
