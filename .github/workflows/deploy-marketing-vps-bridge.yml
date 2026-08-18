@@ -41,12 +41,18 @@ jobs:
             "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
             -d '{"state":"pending","context":"imdssa/marketing-vps-bridge","description":"Marketing VPS bridge started"}' >/dev/null
 
-      - name: Checkout Marketing tested revision
-        uses: actions/checkout@v4
-        with:
-          repository: amanatmedacademy-create/marketing
-          ref: ${{ env.MARKETING_SHA }}
-          path: marketing
+      - name: Download Marketing tested revision
+        run: |
+          set -euo pipefail
+          rm -rf marketing /tmp/marketing-source.tgz /tmp/marketing-extract
+          mkdir -p marketing /tmp/marketing-extract
+          curl -fsSL --retry 3 --connect-timeout 20 \
+            "https://codeload.github.com/amanatmedacademy-create/marketing/tar.gz/$MARKETING_SHA" \
+            -o /tmp/marketing-source.tgz
+          tar -xzf /tmp/marketing-source.tgz -C /tmp/marketing-extract --strip-components=1
+          cp -a /tmp/marketing-extract/. marketing/
+          test -f marketing/package.json
+          test -f marketing/server/platformControl.ts
 
       - name: Publish checkout success
         env:
@@ -54,7 +60,7 @@ jobs:
         run: |
           curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -d '{"state":"success","context":"imdssa/marketing-bridge-checkout","description":"Marketing source checkout succeeded"}' >/dev/null
+            -d '{"state":"success","context":"imdssa/marketing-bridge-checkout","description":"Marketing source download succeeded"}' >/dev/null
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
