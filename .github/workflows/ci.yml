@@ -45,6 +45,12 @@ jobs:
       - name: Build VPS Control Center API
         run: npm run build --workspace @imds/vps-api
 
+      - name: Type check Infrastructure Control API
+        run: npm run lint --workspace @imds/infra-api
+
+      - name: Build Infrastructure Control API
+        run: npm run build --workspace @imds/infra-api
+
       - name: Type check platform contracts
         run: npm run lint --workspace @imds/platform-types
 
