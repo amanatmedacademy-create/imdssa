@@ -1,8 +1,8 @@
-commercial_model_diagnostic=failed
-head=dbb32074a9aa7c0a67baf01d9966d8f37ed9b456
+commercial_model_diagnostic=passed
+head=b4906d8f36986e72a9a7338bfe13f83c1ce8fd4e
 --- tail ---
 
-added 100 packages in 17s
+added 100 packages in 15s
 
 > @imds/vps-api@0.1.0 lint
 > tsc --noEmit
@@ -19,7 +19,7 @@ added 100 packages in 17s
 > imds-platform-control-plane@0.4.0 validate:env
 > node scripts/validate-build-env.mjs
 
-[env] validated environment=production runtime=vps strict=true release=dbb32074a9aa
+[env] validated environment=production runtime=vps strict=true release=b4906d8f3698
 [36mvite v8.2.0 [32mbuilding client environment for production...[36m[39m
 [2Ktransforming...✓ 1800 modules transformed.
 rendering chunks...
@@ -28,5 +28,8 @@ dist/index.html                   0.45 kB │ gzip:  0.29 kB
 dist/assets/index-DrZfkyTM.css   21.72 kB │ gzip:  4.96 kB
 dist/assets/index-xJwlxwM6.js   267.53 kB │ gzip: 77.32 kB
 
-[32m✓ built in 242ms[39m
+[32m✓ built in 212ms[39m
 Warning: Permanently added '89.207.250.55' (ED25519) to the list of known hosts.
+ssh: connect to host 89.207.250.55 port 22: Connection timed out
+ssh: connect to host 89.207.250.55 port 22: Connection timed out
+ssh: connect to host 89.207.250.55 port 22: Connection timed out
