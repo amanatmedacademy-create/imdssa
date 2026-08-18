@@ -52,3 +52,7 @@ The `Deploy Local Release Manager` workflow verifies on the VPS that:
 - recovery retention stays within 10 snapshots.
 
 A successful verification publishes commit status `imdssa/local-recovery = success`.
+
+## Operating policy
+
+GitHub remains the preferred development delivery channel, but it is not part of the production runtime dependency chain. Keep at least one verified recovery snapshot on the VPS before major upgrades. Use application rollback first; restore a database dump only as an explicit disaster-recovery action after verifying that newer production data may be discarded.
