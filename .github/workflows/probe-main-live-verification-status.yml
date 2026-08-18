@@ -1,4 +1,4 @@
-name: Probe Main Live Verification Status
+name: Probe Control Plane E2E Status
 
 on:
   issues:
@@ -14,11 +14,11 @@ jobs:
     if: github.event.issue.number == 47
     runs-on: ubuntu-latest
     steps:
-      - name: Report latest verifier run
+      - name: Report latest control plane E2E run
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          row="$(gh run list --repo "$REPO" --workflow scheduled-main-live-verification.yml --limit 1 --json databaseId,status,conclusion,headSha,event --jq '.[0]')"
-          gh issue comment 47 --repo "$REPO" --body "status_probe=$row"
+          row="$(gh run list --repo "$REPO" --workflow control-plane-e2e.yml --limit 1 --json databaseId,status,conclusion,headSha,event,createdAt --jq '.[0]')"
+          gh issue comment 47 --repo "$REPO" --body "control_plane_probe=$row"
