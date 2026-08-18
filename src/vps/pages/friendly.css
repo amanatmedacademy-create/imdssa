@@ -1,0 +1,143 @@
+:root{
+  font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:#17212b;
+  background:#f4f7f9;
+  font-synthesis:none;
+  text-rendering:optimizeLegibility;
+  --ui-bg:#f4f7f9;
+  --ui-card:#fff;
+  --ui-card-soft:#f8fafb;
+  --ui-text:#17212b;
+  --ui-muted:#718094;
+  --ui-faint:#94a0ad;
+  --ui-border:#dbe3eb;
+  --ui-border-soft:#e9eef2;
+  --ui-accent:#2f7650;
+  --ui-accent-soft:#edf8f2;
+  --ui-danger:#a43b49;
+  --ui-danger-soft:#fff4f5;
+  --ui-warning:#8a6515;
+  --ui-warning-soft:#fff8e8;
+  --ui-radius:14px;
+  --ui-shadow:0 1px 2px rgba(20,32,45,.04),0 10px 32px rgba(20,32,45,.035);
+}
+
+html,body,#root{margin:0;min-height:100%;font-family:inherit;background:var(--ui-bg);color:var(--ui-text);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+body{min-width:320px;font-size:14px;line-height:1.5}
+*{box-sizing:border-box}
+button,input,select,textarea{font:inherit}
+button{letter-spacing:0}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid rgba(47,118,80,.55);outline-offset:2px}
+input::placeholder,textarea::placeholder{color:#a0acb8}
+
+/* Control Center shell */
+.ccv2-shell{background:var(--ui-bg)!important}
+.ccv2-sidebar{width:auto;background:#101820!important;border-right-color:#202d39!important;scrollbar-color:#344353 transparent}
+.ccv2-brand b{font-size:22px!important;letter-spacing:.09em!important;color:#f4f7fa}
+.ccv2-brand span{font-size:11px!important;color:#8191a1!important}
+.ccv2-nav-group>span{font-size:9.5px!important;letter-spacing:.12em!important;color:#738293!important}
+.ccv2-nav-group button,.ccv2-nav-group a{position:relative;min-height:40px!important;border-radius:10px!important;font-size:12.5px!important;font-weight:650!important;color:#b8c3cd!important}
+.ccv2-nav-group button:hover,.ccv2-nav-group a:hover{background:#172431!important;color:#fff!important}
+.ccv2-nav-group button.active{background:#1d2b38!important;color:#fff!important;box-shadow:inset 3px 0 0 #70b596}
+.ccv2-profile-copy strong{font-size:12.5px!important;color:#edf2f6}
+.ccv2-profile-copy span,.ccv2-profile-copy small{font-size:10.5px!important;line-height:1.35}
+.ccv2-logout{min-height:38px!important;border-radius:10px!important}
+.ccv2-main{padding:28px clamp(22px,2.6vw,42px) 56px!important;font-size:13px;line-height:1.5}
+.ccv2-header{margin-bottom:22px!important;padding-bottom:17px;border-bottom:1px solid var(--ui-border-soft)}
+.ccv2-header>div:first-child>span{font-size:10px!important;letter-spacing:.12em!important}
+.ccv2-header h1{margin-top:5px!important;font-size:30px!important;line-height:1.1!important;letter-spacing:-.025em;color:var(--ui-text)}
+.ccv2-header p{margin-top:7px!important;font-size:12.5px!important;color:var(--ui-muted)!important}
+.ccv2-live{min-height:34px;font-size:11px!important;background:#fff!important;box-shadow:0 1px 2px rgba(20,32,45,.03)}
+
+/* Global page readability */
+.ccv2-main h2{letter-spacing:-.012em}
+.ccv2-main h3{letter-spacing:-.008em}
+.ccv2-main p{line-height:1.55}
+.ccv2-main small{font-size:11px!important;line-height:1.42}
+.ccv2-main code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace}
+.ccv2-main [class*="-kpis"] article,
+.ccv2-main [class*="-card"],
+.ccv2-main [class*="-panel"],
+.ccv2-main [class*="-section"]{box-shadow:var(--ui-shadow)}
+.ccv2-main [class*="-kpis"] article{transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease}
+.ccv2-main [class*="-kpis"] article:hover{transform:translateY(-1px);border-color:#ced8e1;box-shadow:0 8px 24px rgba(20,32,45,.055)}
+
+.ccv2-main input:not([type="checkbox"]):not([type="radio"]),
+.ccv2-main select,
+.ccv2-main textarea{min-height:40px;border:1px solid #d2dce5;border-radius:10px;background:#fff;color:#243142;padding:9px 11px;transition:border-color .15s ease,box-shadow .15s ease,background .15s ease}
+.ccv2-main input:not([type="checkbox"]):not([type="radio"]):hover,
+.ccv2-main select:hover,
+.ccv2-main textarea:hover{border-color:#bcc9d5}
+.ccv2-main input:not([type="checkbox"]):not([type="radio"]):focus,
+.ccv2-main select:focus,
+.ccv2-main textarea:focus{outline:0;border-color:#6ba78d;box-shadow:0 0 0 3px rgba(47,118,80,.12)}
+.ccv2-main input[type="checkbox"],.ccv2-main input[type="radio"]{width:17px;height:17px;min-width:17px;accent-color:var(--ui-accent);vertical-align:middle}
+.ccv2-main button{transition:background .15s ease,border-color .15s ease,color .15s ease,transform .1s ease,box-shadow .15s ease}
+.ccv2-main button:not(:disabled):active{transform:translateY(1px)}
+.ccv2-main button:disabled{opacity:.52;cursor:not-allowed!important}
+
+.ccv2-main table{font-size:12px}
+.ccv2-main th{font-size:10px!important;letter-spacing:.055em!important;white-space:nowrap}
+.ccv2-main td{font-size:12px!important;line-height:1.42}
+.ccv2-main tbody tr{transition:background .12s ease}
+.ccv2-main tbody tr:hover{background:#fafcfd}
+.vps-error,.users-error,.infra2-error{font-size:12px!important;line-height:1.5;border-radius:12px!important}
+.vps-status{font-size:10px!important;line-height:1!important;padding:6px 8px!important;text-transform:none!important;letter-spacing:.02em!important}
+.vps-empty{min-height:150px!important}
+
+/* Product commercial configuration still shares old utility class names; normalize it inside v2. */
+.ccv2-main .product-commercial-shell{display:grid;gap:16px}
+.ccv2-main .product-commercial-shell>.vps-card{margin:0!important;padding:20px!important;border:1px solid var(--ui-border)!important;border-radius:16px!important;background:#fff!important;box-shadow:var(--ui-shadow)!important}
+.ccv2-main .vps-card-head{margin-bottom:16px!important}
+.ccv2-main .vps-card-head h2{font-size:19px!important}
+.ccv2-main .vps-card-head p{margin:6px 0 0;color:var(--ui-muted);font-size:12px}
+.ccv2-main .vps-mini,.ccv2-main .vps-action{min-height:36px;border:1px solid #d5dfe7;border-radius:9px;padding:8px 11px;background:#fff;color:#334155;font-size:11px;font-weight:750;cursor:pointer}
+.ccv2-main .vps-action{background:#1f2937;color:#fff;border-color:#1f2937}
+.ccv2-main .commercial-table-wrap{border-radius:12px;overflow:auto;border:1px solid var(--ui-border-soft)}
+.ccv2-main .commercial-table{min-width:900px}
+.ccv2-main .product-detail-tabs{gap:6px;overflow:auto;padding-bottom:2px}
+.ccv2-main .product-detail-tabs button{white-space:nowrap;min-height:36px}
+
+/* Login */
+.vps-login{font-family:inherit!important;background:radial-gradient(circle at 50% 0,#1b2b38 0,#101820 42%,#0c1219 100%)!important}
+.vps-login-card{border-radius:22px!important;border-color:#2a3744!important;background:rgba(16,24,32,.96)!important;box-shadow:0 28px 90px rgba(0,0,0,.42)!important}
+.vps-login-copy h1{font-size:29px!important;letter-spacing:-.025em}
+.vps-login-copy p{font-size:13px!important;line-height:1.5}
+.vps-login-card label{font-size:12px!important;font-weight:650}
+.vps-login-card input{min-height:44px!important;border-radius:11px!important;font-size:14px!important}
+.vps-primary{min-height:44px!important;border-radius:11px!important;font-size:13px!important}
+.vps-password-field{position:relative}
+.vps-password-field input{padding-right:48px!important}
+.vps-password-toggle{position:absolute;top:50%;right:6px;transform:translateY(-50%);display:grid;place-items:center;width:34px!important;height:34px!important;min-height:34px!important;margin:0!important;padding:0!important;border:0!important;border-radius:9px!important;background:transparent!important;color:#8ea0b2!important;cursor:pointer}
+.vps-password-toggle:hover{background:#18232e!important;color:#dce6ee!important}
+
+/* Infrastructure uses the same typography and control language but remains a separate workspace. */
+.infra2-shell,.infra2-state{font-family:inherit!important}
+.infra2-main{font-size:13px;line-height:1.5}
+.infra2-main small{font-size:11px!important;line-height:1.42}
+.infra2-main input:not([type="checkbox"]):not([type="radio"]),.infra2-main select{min-height:40px;border-radius:10px!important;font-size:12px!important}
+.infra2-main th{font-size:10px!important}
+.infra2-main td{font-size:12px!important}
+.infra2-main button{font-size:11.5px!important}
+
+@media(max-width:1100px){
+  .ccv2-main{padding:24px 22px 48px!important}
+}
+@media(max-width:760px){
+  .ccv2-sidebar{position:relative!important;height:auto!important;max-height:none!important;padding:14px!important;gap:12px!important;overflow:visible!important}
+  .ccv2-nav-group{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px!important}
+  .ccv2-nav-group>span{grid-column:1/-1}
+  .ccv2-nav-group button,.ccv2-nav-group a{min-height:42px!important}
+  .ccv2-infra-link{grid-template-columns:1fr}
+  .ccv2-infra-link small{display:none}
+  .ccv2-profile{grid-template-columns:minmax(0,1fr) 110px;align-items:center}
+  .ccv2-main{padding:18px 14px 40px!important}
+  .ccv2-header{gap:12px!important}
+  .ccv2-header h1{font-size:25px!important}
+  .ccv2-main [class*="-toolbar"]{align-items:stretch}
+}
+@media(max-width:480px){
+  .ccv2-nav-group{grid-template-columns:1fr}
+  .ccv2-profile{grid-template-columns:1fr}
+  .ccv2-main{padding-left:12px!important;padding-right:12px!important}
+}
