@@ -1,0 +1,20 @@
+name: Trigger Main Live Verification From Issue
+
+on:
+  issues:
+    types: [edited]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  trigger:
+    if: github.event.issue.number == 47
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch one-shot verifier
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: gh workflow run scheduled-main-live-verification.yml --repo "$REPO" --ref main
