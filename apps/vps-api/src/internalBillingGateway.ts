@@ -18,6 +18,9 @@ async function body(req: IncomingMessage): Promise<JsonRecord> {
   for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) as JsonRecord : {};
 }
+function cloudConfigured(): boolean {
+  return Boolean(text(process.env.CLOUDPAYMENTS_PUBLIC_ID) && text(process.env.CLOUDPAYMENTS_API_SECRET));
+}
 
 async function resolveTarget(pool: Pool | PoolClient, input: { organizationId?: string; externalTenantId?: string }) {
   const organizationId = text(input.organizationId);
@@ -32,7 +35,7 @@ async function resolveTarget(pool: Pool | PoolClient, input: { organizationId?: 
 
 async function invoiceList(pool: Pool | PoolClient, organizationId: string, productId: string) {
   const result = await pool.query(`select i.id,i.invoice_number number,i.status,i.total_kzt amount,i.currency,i.issued_at "issuedAt",i.due_at "dueAt",i.paid_at "paidAt",
-      greatest(i.total_kzt-i.paid_total_kzt,0) "outstandingAmount"
+      greatest(i.total_kzt-i.paid_total_kzt,0) "outstandingAmount",i.checkout_url url
     from app.billing_invoices i join app.product_subscriptions s on s.id=i.subscription_id
     where i.organization_id=$1 and s.product_id=$2
     order by i.created_at desc limit 100`, [organizationId,productId]);
@@ -75,7 +78,7 @@ async function center(pool: Pool, target: Record<string, unknown>) {
     plans,
     addOns:addonsResult.rows.map((addon) => ({ code:addon.code,name:addon.name,description:addon.description,amount:number(addon.prices?.[String(months)]),currency:'KZT',unit:`${months} мес.`,prices:addon.prices })),
     invoices,
-    capabilities:{checkout:true,portal:false,invoices:true,addOns:false},
+    capabilities:{checkout:true,portal:false,invoices:true,addOns:false,cardCheckout:cloudConfigured()},
   };
 }
 
@@ -87,6 +90,42 @@ async function ensureAccount(client: PoolClient, target: Record<string, unknown>
   return result.rows[0].id;
 }
 
+async function createCloudOrder(input: {
+  invoiceId: string;
+  amount: number;
+  description: string;
+  accountId: string;
+  successUrl: string;
+  failUrl: string;
+}): Promise<{ url: string; providerOrderId: string | null }> {
+  const publicId = text(process.env.CLOUDPAYMENTS_PUBLIC_ID);
+  const secret = text(process.env.CLOUDPAYMENTS_API_SECRET);
+  if (!publicId || !secret) throw new Error('CLOUDPAYMENTS_NOT_CONFIGURED');
+  const form = new URLSearchParams();
+  form.set('Amount', input.amount.toFixed(2));
+  form.set('Currency', 'KZT');
+  form.set('Description', input.description);
+  form.set('InvoiceId', input.invoiceId);
+  form.set('AccountId', input.accountId);
+  form.set('SuccessRedirectUrl', input.successUrl);
+  form.set('FailRedirectUrl', input.failUrl);
+  form.set('CultureName', 'ru-RU');
+  form.set('JsonData', JSON.stringify({ invoiceId:input.invoiceId,source:'imds_control_center' }));
+  const response = await fetch('https://api.cloudpayments.ru/orders/create', {
+    method:'POST',
+    headers:{ authorization:`Basic ${Buffer.from(`${publicId}:${secret}`).toString('base64')}`, 'content-type':'application/x-www-form-urlencoded' },
+    body:form,
+    signal:AbortSignal.timeout(10000),
+  });
+  const raw = await response.text();
+  let payload: JsonRecord = {};
+  try { payload = raw ? JSON.parse(raw) as JsonRecord : {}; } catch {}
+  const model = payload.Model && typeof payload.Model === 'object' ? payload.Model as JsonRecord : payload;
+  const url = text(model.Url || model.url || payload.Url || payload.url);
+  if (!response.ok || payload.Success === false || !url) throw new Error(`CLOUDPAYMENTS_${response.status}:${text(payload.Message) || 'CHECKOUT_CREATE_FAILED'}`);
+  return { url,providerOrderId:text(model.Id || model.id)||null };
+}
+
 async function checkout(pool: Pool, target: Record<string, unknown>, payload: JsonRecord) {
   if (payload.kind === 'addon') return { status:409, body:{ error:'ADDON_SELF_SERVICE_NOT_ENABLED' } };
   const planCode = text(payload.planCode);
@@ -95,6 +134,11 @@ async function checkout(pool: Pool, target: Record<string, unknown>, payload: Js
   if (![1,3,6,12].includes(months)) return { status:400, body:{ error:'INVALID_BILLING_PERIOD' } };
 
   const client = await pool.connect();
+  let invoiceId = '';
+  let invoiceNumber = '';
+  let price = 0;
+  let planName = '';
+  let dueAt = new Date();
   try {
     await client.query('begin');
     const subscriptionResult = await client.query(`select s.* from app.product_subscriptions s where s.organization_id=$1 and s.product_id=$2 for update`, [target.organization_id,target.product_id]);
@@ -104,31 +148,52 @@ async function checkout(pool: Pool, target: Record<string, unknown>, payload: Js
       from app.product_plans p where p.product_id=$1 and p.code=$2 and p.status='published' limit 1`, [target.product_id,planCode,months]);
     if (!planResult.rowCount) { await client.query('rollback'); return { status:404, body:{error:'PLAN_NOT_FOUND'} }; }
     const plan = planResult.rows[0];
+    planName = String(plan.name || plan.code);
     if (plan.pricing_mode!=='fixed') { await client.query('rollback'); return { status:409, body:{error:'PLAN_REQUIRES_SALES_CONTACT'} }; }
-    const price = number(plan.period_price);
-    if (price == null || price <= 0) { await client.query('rollback'); return { status:409, body:{error:'PLAN_PRICE_NOT_CONFIGURED_FOR_PERIOD'} }; }
-    const duplicate = await client.query(`select id,invoice_number from app.billing_invoices where subscription_id=$1 and status in ('draft','issued','partially_paid','overdue') order by created_at desc limit 1`, [subscription.id]);
-    if (duplicate.rowCount) { await client.query('rollback'); return { status:409, body:{error:'OPEN_INVOICE_ALREADY_EXISTS',invoiceId:duplicate.rows[0].id,invoiceNumber:duplicate.rows[0].invoice_number} }; }
+    const parsedPrice = number(plan.period_price);
+    if (parsedPrice == null || parsedPrice <= 0) { await client.query('rollback'); return { status:409, body:{error:'PLAN_PRICE_NOT_CONFIGURED_FOR_PERIOD'} }; }
+    price = parsedPrice;
+    const duplicate = await client.query(`select id,invoice_number,checkout_url from app.billing_invoices where subscription_id=$1 and status in ('draft','issued','partially_paid','overdue') order by created_at desc limit 1`, [subscription.id]);
+    if (duplicate.rowCount) { await client.query('rollback'); return { status:409, body:{error:'OPEN_INVOICE_ALREADY_EXISTS',invoiceId:duplicate.rows[0].id,invoiceNumber:duplicate.rows[0].invoice_number,checkoutUrl:duplicate.rows[0].checkout_url||undefined} }; }
     const accountId = await ensureAccount(client,target);
     const document = await client.query<{value:string}>(`select app.next_billing_document_number('INV-','invoice') value`);
-    const invoiceNumber = document.rows[0].value;
-    const now = new Date(); const dueAt = new Date(now.getTime()+7*86400000);
+    invoiceNumber = document.rows[0].value;
+    const now = new Date(); dueAt = new Date(now.getTime()+7*86400000);
     const periodStart = subscription.current_period_end && new Date(subscription.current_period_end)>now ? new Date(subscription.current_period_end) : now;
     const periodEnd = new Date(periodStart); periodEnd.setUTCMonth(periodEnd.getUTCMonth()+months);
     const snapshot = { pendingPlanId:plan.id,pendingPlanCode:plan.code,pendingPlanRevision:plan.revision,pendingBillingPeriodMonths:months,pendingLimits:plan.limits,source:'marketing_self_service' };
     const inserted = await client.query<{id:string}>(`insert into app.billing_invoices(billing_account_id,organization_id,subscription_id,invoice_number,status,currency,subtotal_kzt,total_kzt,period_start,period_end,issued_at,due_at,pricing_snapshot)
       values($1,$2,$3,$4,'issued','KZT',$5,$5,$6,$7,$8,$9,$10::jsonb) returning id`,
       [accountId,target.organization_id,subscription.id,invoiceNumber,price,periodStart.toISOString(),periodEnd.toISOString(),now.toISOString(),dueAt.toISOString(),JSON.stringify(snapshot)]);
-    const invoiceId = inserted.rows[0].id;
+    invoiceId = inserted.rows[0].id;
     await client.query(`insert into app.billing_invoice_lines(invoice_id,line_type,product_id,description,quantity,unit_price_kzt,line_total_kzt,metadata)
       values($1,'subscription',$2,$3,1,$4,$4,$5::jsonb)`, [invoiceId,target.product_id,`${target.product_name} · ${plan.name} · ${months} мес.`,price,JSON.stringify({planCode:plan.code,months})]);
     await client.query(`insert into app.billing_events(organization_id,subscription_id,invoice_id,event_type,payload)
       values($1,$2,$3,'invoice.self_service_issued',$4::jsonb)`, [target.organization_id,subscription.id,invoiceId,JSON.stringify({invoiceNumber,planCode:plan.code,months,totalKzt:price})]);
     await client.query('commit');
-    return { status:201, body:{ ok:true,invoiceCreated:true,invoiceId,invoiceNumber,status:'issued',amount:price,currency:'KZT',dueAt:dueAt.toISOString() } };
   } catch (error) {
     await client.query('rollback'); throw error;
   } finally { client.release(); }
+
+  const baseBody: JsonRecord = { ok:true,invoiceCreated:true,invoiceId,invoiceNumber,status:'issued',amount:price,currency:'KZT',dueAt:dueAt.toISOString() };
+  if (!cloudConfigured()) return { status:201,body:baseBody };
+  try {
+    const checkout = await createCloudOrder({
+      invoiceId,amount:price,description:`${target.product_name} · ${planName}`,
+      accountId:text(target.external_key)||String(target.organization_id),
+      successUrl:text(payload.successUrl)||'http://89.207.250.55/billing?billing=success',
+      failUrl:text(payload.cancelUrl)||'http://89.207.250.55/billing?billing=cancel',
+    });
+    await pool.query(`update app.billing_invoices set payment_provider='cloudpayments',provider_order_id=$2,checkout_url=$3,updated_at=now() where id=$1`, [invoiceId,checkout.providerOrderId,checkout.url]);
+    await pool.query(`insert into app.billing_events(organization_id,subscription_id,invoice_id,event_type,payload)
+      select organization_id,subscription_id,id,'invoice.checkout_created',$2::jsonb from app.billing_invoices where id=$1`, [invoiceId,JSON.stringify({provider:'cloudpayments',providerOrderId:checkout.providerOrderId})]);
+    return { status:201,body:{...baseBody,checkoutUrl:checkout.url,paymentProvider:'cloudpayments'} };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await pool.query(`insert into app.billing_events(organization_id,subscription_id,invoice_id,event_type,payload)
+      select organization_id,subscription_id,id,'invoice.checkout_failed',$2::jsonb from app.billing_invoices where id=$1`, [invoiceId,JSON.stringify({provider:'cloudpayments',error:message})]).catch(()=>undefined);
+    return { status:201,body:{...baseBody,paymentProviderError:message} };
+  }
 }
 
 export async function handleInternalBillingGateway(req: IncomingMessage,res: ServerResponse,pool: Pool,url: URL,method: string): Promise<boolean> {
