@@ -4,12 +4,16 @@ export const CONTROL_CENTER_BRAND = {
   fullName: 'IMDS Control Center',
 } as const;
 
+const productOwnedNavigation = new Set(['Модули', 'Установки']);
+
 export function installControlCenterBranding(root: HTMLElement) {
   const apply = () => {
     root.querySelectorAll<HTMLElement>('.vps-brand span').forEach((element) => {
-      if (element.textContent?.trim() === 'Super Admin') {
-        element.textContent = CONTROL_CENTER_BRAND.name;
-      }
+      if (element.textContent?.trim() === 'Super Admin') element.textContent = CONTROL_CENTER_BRAND.name;
+    });
+    root.querySelectorAll<HTMLButtonElement>('.vps-sidebar nav button').forEach((button) => {
+      const label = button.textContent?.trim() || '';
+      button.style.display = productOwnedNavigation.has(label) ? 'none' : '';
     });
     document.title = CONTROL_CENTER_BRAND.fullName;
   };
