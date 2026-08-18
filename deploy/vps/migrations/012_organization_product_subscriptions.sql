@@ -63,17 +63,25 @@ GRANT SELECT,INSERT,UPDATE,DELETE ON app.product_subscription_items TO imdssa_ap
 GRANT SELECT,INSERT,UPDATE,DELETE ON app.product_subscription_events TO imdssa_app;
 GRANT USAGE,SELECT ON SEQUENCE app.product_subscription_events_id_seq TO imdssa_app;
 
--- Preserve existing access. Existing organizations get a non-priced legacy subscription
--- so introducing the billing domain never disables a product that is already active.
+-- Preserve existing access without converting registration trials into permanent free access.
 INSERT INTO app.product_subscriptions(
-  organization_id,product_id,status,billing_period_months,currency,limits,plan_snapshot,metadata
+  organization_id,product_id,status,billing_period_months,currency,
+  trial_started_at,trial_ends_at,access_ends_at,limits,plan_snapshot,metadata
 )
 SELECT op.organization_id,op.product_id,
-       CASE WHEN op.status::text='active' THEN 'free' ELSE 'suspended' END,
+       CASE
+         WHEN op.config->>'source'='registration' AND nullif(op.config->>'trialEndsAt','') IS NOT NULL
+           THEN CASE WHEN (op.config->>'trialEndsAt')::timestamptz > now() THEN 'trial' ELSE 'expired' END
+         WHEN op.status::text='active' THEN 'free'
+         ELSE 'suspended'
+       END,
        1,'KZT',
+       CASE WHEN op.config->>'source'='registration' THEN nullif(op.config->>'trialStartsAt','')::timestamptz END,
+       CASE WHEN op.config->>'source'='registration' THEN nullif(op.config->>'trialEndsAt','')::timestamptz END,
+       CASE WHEN op.config->>'source'='registration' THEN nullif(op.config->>'trialEndsAt','')::timestamptz END,
        CASE WHEN jsonb_typeof(op.config->'limits')='object' THEN op.config->'limits' ELSE '{}'::jsonb END,
-       jsonb_build_object('legacy',true,'plan',op.plan),
-       jsonb_build_object('source','organization_products_backfill')
+       jsonb_build_object('legacy',true),
+       jsonb_build_object('source','organization_products_backfill','originalStatus',op.status::text)
 FROM app.organization_products op
 ON CONFLICT(organization_id,product_id) DO NOTHING;
 
