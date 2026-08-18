@@ -6,6 +6,7 @@ on:
 
 permissions:
   actions: write
+  issues: write
   contents: read
 
 jobs:
@@ -13,6 +14,11 @@ jobs:
     if: github.event.issue.number == 47
     runs-on: ubuntu-latest
     steps:
+      - name: Mark trigger start
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: gh issue comment 47 --repo "$REPO" --body 'trigger_started=true'
       - name: Dispatch one-shot verifier
         env:
           GH_TOKEN: ${{ github.token }}
