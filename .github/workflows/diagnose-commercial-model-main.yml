@@ -55,3 +55,4 @@ jobs:
           git pull --rebase origin main
           git push origin HEAD:main
           exit 0
+# rerun after session management stylesheet fix
