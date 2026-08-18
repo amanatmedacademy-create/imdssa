@@ -1,0 +1,100 @@
+name: Verify Main User Access Runtime
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-main-user-access.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: verify-main-user-access
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run lint --workspace @imds/vps-api
+          npm run build --workspace @imds/vps-api
+          npm run lint
+          VITE_RUNTIME=vps VITE_APP_ENV=production VITE_APP_VERSION=0.8.0 IMDS_STRICT_ENV=true npm run build
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Verify live VPS runtime without synthetic data
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20)
+          for _ in $(seq 1 120); do
+            if sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo test -f /opt/imds-super-admin/api/dist/userAccessRoutes.js && sudo grep -q PASSWORD_CHANGE_REQUIRED /opt/imds-super-admin/api/dist/tenantRoutes.js && sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select exists(select 1 from information_schema.columns where table_schema='"'"'app'"'"' and table_name='"'"'platform_users'"'"' and column_name='"'"'must_change_password'"'"')" | grep -q '^t$'' 2>/dev/null; then
+              break
+            fi
+            sleep 5
+          done
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          API=http://127.0.0.1:8788
+          test -f /opt/imds-super-admin/api/dist/userAccessRoutes.js
+          grep -q PASSWORD_CHANGE_REQUIRED /opt/imds-super-admin/api/dist/tenantRoutes.js
+          grep -q organization_membership.upsert /opt/imds-super-admin/api/dist/userAccessRoutes.js
+          test "$(systemctl is-active imds-super-admin-api.service)" = active
+          test "$(systemctl is-active imdssa-reconcile.timer)" = active
+          test "$(systemctl is-active imdssa-product-monitor.timer)" = active
+          curl -fsS --max-time 10 "$API/healthz" >/dev/null
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select exists(select 1 from information_schema.columns where table_schema='app' and table_name='platform_users' and column_name='must_change_password')" | grep -q '^t$'
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.organization_memberships') is not null" | grep -q '^t$'
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.product_plans') is not null and to_regclass('app.product_module_commercial') is not null" | grep -q '^t$'
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select exists(select 1 from pg_trigger where tgname='clear_must_change_password' and not tgisinternal)" | grep -q '^t$'
+
+          TOKEN="$(openssl rand -hex 32)"
+          TOKEN_HASH="$(printf '%s' "$TOKEN" | sha256sum | awk '{print $1}')"
+          ADMIN_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end,created_at limit 1")"
+          test -n "$ADMIN_ID"
+          cleanup() { sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$TOKEN_HASH'" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          sudo -u postgres psql --dbname=imdssa --command="insert into app.auth_sessions(user_id,token_hash,expires_at) values('$ADMIN_ID'::uuid,'$TOKEN_HASH',now()+interval '5 minutes')" >/dev/null
+          curl -fsS --max-time 10 -H "Cookie: imdssa_session=$TOKEN" "$API/api/v1/access/users" >/tmp/user-access.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/user-access.json'))
+          if not isinstance(data.get('items'), list): raise SystemExit('access users response is invalid')
+          print(f"real_memberships_visible={len(data['items'])}")
+          PY
+          rm -f /tmp/user-access.json
+
+          source /etc/imds-platform-control.env
+          curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info | grep -q 'imds-marketing'
+          REMOTE
+      - name: Record successful verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'IMDS Automation'
+          git config user.email 'automation@imds.local'
+          git pull --rebase origin main
+          mkdir -p docs/internal
+          printf '{"verified":true,"scope":"user-access-runtime","sourceSha":"%s","verifiedAt":"%s"}\n' "$GITHUB_SHA" "$(date -u +%FT%TZ)" > docs/internal/user-access-runtime-verification.json
+          git add docs/internal/user-access-runtime-verification.json
+          git commit -m 'record successful user access runtime verification'
+          git push origin HEAD:main
