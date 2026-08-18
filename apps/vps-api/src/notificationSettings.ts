@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
+import { handleProductCommercialApi } from './productCommercial.js';
 
 type PlatformUser = { id: string; global_role: string | null };
 
@@ -105,6 +106,8 @@ async function telegramRequest(token: string, method: string, payload: Record<st
 }
 
 export async function handleNotificationSettingsApi(req: IncomingMessage, res: ServerResponse, pool: Pool, url: URL, method: string, user: PlatformUser): Promise<boolean> {
+  if (await handleProductCommercialApi({ req, res, pool, url, method, user, json })) return true;
+
   const path = '/api/v1/settings/notifications/telegram';
   if (url.pathname !== path && url.pathname !== `${path}/test`) return false;
   if (!canManage(user)) { json(res, 403, { error: 'PLATFORM_ADMIN_REQUIRED' }); return true; }
