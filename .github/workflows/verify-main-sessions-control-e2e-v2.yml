@@ -1,0 +1,109 @@
+name: Verify Main Sessions and Control Plane E2E
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-main-sessions-control-e2e-v2.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate source
+        env:
+          VITE_RUNTIME: vps
+          VITE_APP_ENV: production
+          VITE_APP_VERSION: 0.8.0
+          IMDS_STRICT_ENV: 'true'
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run lint --workspace @imds/vps-api
+          npm run build --workspace @imds/vps-api
+          npm run lint
+          npm run build
+      - run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Verify live session API and reversible analytics enforcement
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          command -v jq >/dev/null 2>&1 || { apt-get update >/dev/null && apt-get install -y jq >/dev/null; }
+          SA=http://127.0.0.1:8788; M=http://127.0.0.1:8787; ORG='Amanat Med Academy'; MOD='marketing.analytics'
+          test -f /opt/imds-super-admin/api/dist/sessionRoutes.js
+          systemctl is-active --quiet imds-super-admin-api.service
+          systemctl is-active --quiet imdssa-reconcile.timer
+          ADMIN="$(sudo -u postgres psql -d imdssa -At -c "select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by created_at limit 1")"
+          T1="$(openssl rand -hex 32)"; H1="$(printf %s "$T1"|sha256sum|awk '{print $1}')"
+          T2="$(openssl rand -hex 32)"; H2="$(printf %s "$T2"|sha256sum|awk '{print $1}')"
+          S2="$(sudo -u postgres psql -d imdssa -At -c "insert into app.auth_sessions(user_id,token_hash,expires_at,source_ip,user_agent) values('$ADMIN'::uuid,'$H2',now()+interval '10 min','127.0.0.1','IMDS E2E secondary') returning id")"
+          sudo -u postgres psql -d imdssa -c "insert into app.auth_sessions(user_id,token_hash,expires_at,source_ip,user_agent) values('$ADMIN'::uuid,'$H1',now()+interval '10 min','127.0.0.1','IMDS E2E current')" >/dev/null
+          COOKIE="Cookie: imdssa_session=$T1"
+          cleanup_sa(){ sudo -u postgres psql -d imdssa -c "delete from app.auth_sessions where token_hash in('$H1','$H2')" >/dev/null 2>&1||true; }
+          trap cleanup_sa EXIT
+          curl -fsS -H "$COOKIE" "$SA/api/auth/sessions" | jq -e --arg id "$S2" '.items|map(select(.id==$id))|length==1' >/dev/null
+          curl -fsS -H "$COOKIE" -X DELETE "$SA/api/auth/sessions/$S2" | jq -e '.revoked==true' >/dev/null
+          echo SESSION_MANAGEMENT=success
+
+          I="$(curl -fsS -H "$COOKIE" "$SA/api/v1/installations")"
+          IID="$(printf %s "$I"|jq -r --arg m "$MOD" --arg o "$ORG" '.items[]|select(.module_code==$m and .organization_name==$o)|.id'|head -1)"
+          OID="$(printf %s "$I"|jq -r --arg id "$IID" '.items[]|select(.id==$id)|.organization_id'|head -1)"
+          ORIGINAL="$(printf %s "$I"|jq -r --arg id "$IID" '.items[]|select(.id==$id)|.status'|head -1)"
+          [[ "$IID" =~ ^[0-9a-f-]{36}$ && "$OID" =~ ^[0-9a-f-]{36}$ ]]
+          source /etc/imds-platform-control.env
+          ST="$(curl -fsS -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" "$M/internal/platform/state")"
+          TENANT="$(printf %s "$ST"|jq -r --arg o "$OID" '.tenants|to_entries[]|select(.value.organizationId==$o)|.key'|head -1)"
+          [[ "$TENANT" =~ ^[0-9a-f-]{36}$ ]]
+          MU="$(docker exec imds-postgres psql -U imds_owner -d imds_marketing -At -c "select id from public.imds_auth_users where lower(email)='admin@imds.kz' and status='active' limit 1")"
+          MT="$(openssl rand -hex 48)"; MH="$(printf %s "$MT"|sha256sum|awk '{print $1}')"
+          docker exec imds-postgres psql -U imds_owner -d imds_marketing -c "insert into public.imds_auth_sessions(user_id,token_hash,remember_me,expires_at) values('$MU'::uuid,'$MH',false,now()+interval '10 min')" >/dev/null
+          restore(){
+            CUR="$(curl -fsS -H "$COOKIE" "$SA/api/v1/installations" 2>/dev/null|jq -r --arg id "$IID" '.items[]|select(.id==$id)|.status'|head -1||true)"
+            if [ "$CUR" != "$ORIGINAL" ]; then curl -fsS -H "$COOKIE" -H 'content-type: application/json' -X PATCH "$SA/api/v1/installations/$IID" --data "{\"status\":\"$ORIGINAL\"}" >/dev/null||true; for _ in $(seq 1 20); do systemctl start imdssa-reconcile.service >/dev/null 2>&1||true; sleep 1; done; fi
+            docker exec imds-postgres psql -U imds_owner -d imds_marketing -c "delete from public.imds_auth_sessions where token_hash='$MH'" >/dev/null 2>&1||true
+            cleanup_sa
+          }
+          trap restore EXIT
+          rev(){ curl -fsS -H "$COOKIE" "$SA/api/v1/organization-products"|jq -r --arg o "$OID" '.items[]|select(.organization_id==$o and .product_code=="imds-marketing")|.desired_revision'; }
+          wait_state(){
+            EXP="$1"; START="$2"; NEED403="$3"
+            for N in $(seq 1 30); do
+              systemctl start imdssa-reconcile.service >/dev/null 2>&1||true; sleep 1
+              INS="$(curl -fsS -H "$COOKIE" "$SA/api/v1/installations")"; A="$(printf %s "$INS"|jq -r --arg id "$IID" '.items[]|select(.id==$id)|.actual_enabled')"; S="$(printf %s "$INS"|jq -r --arg id "$IID" '.items[]|select(.id==$id)|.sync_status')"
+              B="$(curl -fsS -H "$COOKIE" "$SA/api/v1/organization-products")"; D="$(printf %s "$B"|jq -r --arg o "$OID" '.items[]|select(.organization_id==$o and .product_code=="imds-marketing")|.desired_revision')"; BA="$(printf %s "$B"|jq -r --arg o "$OID" '.items[]|select(.organization_id==$o and .product_code=="imds-marketing")|.actual_revision')"
+              R="$(curl -fsS -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" "$M/internal/platform/state")"; RE="$(printf %s "$R"|jq -r --arg t "$TENANT" --arg m "$MOD" '.tenants[$t].modules[$m]')"; RR="$(printf %s "$R"|jq -r --arg t "$TENANT" '.tenants[$t].revision')"
+              C="$(sudo -u postgres psql -d imdssa -At -c "select c.status from app.control_commands c join app.products p on p.id=c.product_id where c.organization_id='$OID'::uuid and p.code='imds-marketing' and c.desired_revision=$D order by c.created_at desc limit 1"|xargs)"
+              if [ "$A" = "$EXP" ] && [ "$S" = synced ] && [ "$BA" = "$D" ] && [ "$RE" = "$EXP" ] && [ "$RR" = "$D" ] && [ "$C" = succeeded ] && [ "$D" -gt "$START" ]; then
+                if [ "$NEED403" = yes ]; then CODE="$(curl -sS -o /tmp/gate.json -w '%{http_code}' -H "Authorization: Bearer $MT" -H "x-imds-company-id: $TENANT" "$M/api/analytics")"; test "$CODE" = 403; jq -e --arg m "$MOD" '.error=="MODULE_DISABLED_BY_PLATFORM" and .module==$m' /tmp/gate.json >/dev/null; echo MARKETING_DIRECT_API_403=success; fi
+                echo "E2E_SYNCED expected=$EXP revision=$D attempts=$N"; return 0
+              fi
+            done
+            return 1
+          }
+          BEFORE="$(rev)"; TEST=suspended; EXP=false; GATE=yes
+          if [ "$ORIGINAL" = suspended ]; then TEST=active; EXP=true; GATE=no; fi
+          curl -fsS -H "$COOKIE" -H 'content-type: application/json' -X PATCH "$SA/api/v1/installations/$IID" --data "{\"status\":\"$TEST\"}" >/dev/null
+          wait_state "$EXP" "$BEFORE" "$GATE"
+          MID="$(rev)"; curl -fsS -H "$COOKIE" -H 'content-type: application/json' -X PATCH "$SA/api/v1/installations/$IID" --data "{\"status\":\"$ORIGINAL\"}" >/dev/null
+          OE=true; [ "$ORIGINAL" = suspended ] && OE=false
+          wait_state "$OE" "$MID" no
+          echo CONTROL_PLANE_E2E=success
+          echo ORIGINAL_STATUS_RESTORED="$ORIGINAL"
+          REMOTE
