@@ -150,8 +150,8 @@ export function ControlCenterV2() {
       <div className="ccv2-brand"><b>IMDS</b><span>Control Center v2</span></div>
       <div className="ccv2-nav-group"><span>ПРОДУКТЫ И КЛИЕНТЫ</span>{visibleBusiness.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={17} />{label}</button>)}</div>
       <div className="ccv2-nav-group"><span>АДМИНИСТРИРОВАНИЕ</span>{visibleAdministration.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={17} />{label}</button>)}</div>
-      {user.scope === 'platform' && <div className="ccv2-nav-group ccv2-infra-link"><span>СЕРВЕР</span><a href="/"><ServerCog size={17} />Инфраструктура</a><small>Отдельный технический контур</small></div>}
-      <div className="ccv2-profile"><strong>{user.fullName}</strong><span>{user.email}</span><a href="/">Production UI</a></div>
+      {user.scope === 'platform' && <div className="ccv2-nav-group ccv2-infra-link"><span>СЕРВЕР</span><a href="/infrastructure"><ServerCog size={17} />Инфраструктура</a><small>Отдельный технический контур</small></div>}
+      <div className="ccv2-profile"><strong>{user.fullName}</strong><span>{user.email}</span><a href="/">Control Center</a></div>
     </aside>
     <main className="ccv2-main">
       <header className="ccv2-header"><div><span>IMDS CONTROL CENTER</span><h1>{selected.label}</h1><p>{selected.description}</p></div><div className={`ccv2-live ${realtimeState}`}><i />{realtimeState === 'online' ? 'Realtime' : realtimeState === 'connecting' ? 'Connecting' : 'Offline'}</div></header>
