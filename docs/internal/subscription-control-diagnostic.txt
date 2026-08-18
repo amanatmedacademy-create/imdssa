@@ -1,0 +1,25 @@
+subscription_control_diagnostic=failed
+phase=source
+head=e42d8f0f402e5b7e04f6d15f9d3161810526b966
+--- tail ---
+
+added 100 packages in 23s
+
+> @imds/vps-api@0.1.0 lint
+> tsc --noEmit
+
+src/subscriptions.ts(108,18): error TS18047: 'plan' is possibly 'null'.
+src/subscriptions.ts(108,57): error TS18047: 'plan' is possibly 'null'.
+src/subscriptions.ts(109,18): error TS18047: 'plan' is possibly 'null'.
+src/subscriptions.ts(110,34): error TS18047: 'plan' is possibly 'null'.
+src/subscriptions.ts(115,16): error TS18047: 'plan' is possibly 'null'.
+src/subscriptions.ts(115,38): error TS18047: 'plan' is possibly 'null'.
+src/subscriptions.ts(115,81): error TS18047: 'plan' is possibly 'null'.
+src/subscriptions.ts(115,96): error TS18047: 'plan' is possibly 'null'.
+npm error Lifecycle script `lint` failed with error:
+npm error code 1
+npm error path /home/runner/work/imdssa/imdssa/apps/vps-api
+npm error workspace @imds/vps-api@0.1.0
+npm error location /home/runner/work/imdssa/imdssa/apps/vps-api
+npm error command failed
+npm error command sh -c tsc --noEmit
