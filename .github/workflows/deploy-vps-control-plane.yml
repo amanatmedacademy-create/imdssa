@@ -49,6 +49,7 @@ jobs:
           cp deploy/vps/migrations/007_notification_delivery_settings.sql .deploy-stage/007_notification_delivery_settings.sql
           cp deploy/vps/migrations/009_tenant_user_access.sql .deploy-stage/009_tenant_user_access.sql
           cp deploy/vps/migrations/010_product_commercial_catalog.sql .deploy-stage/010_product_commercial_catalog.sql
+          cp deploy/vps/migrations/011_product_commercial_model.sql .deploy-stage/011_product_commercial_model.sql
           cp deploy/vps/nginx-super-admin.conf .deploy-stage/nginx.conf
           cp deploy/vps/deploy-control-plane.sh .deploy-stage/deploy-control-plane.sh
           cp deploy/vps/product-monitor.sh .deploy-stage/product-monitor.sh
@@ -65,7 +66,7 @@ jobs:
           sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'rm -rf /tmp/imdssa-release && mkdir -p /tmp/imdssa-release'
           sshpass -e scp "${SSH_ARGS[@]}" -r .deploy-stage/. "$VPS_USER@$VPS_HOST:/tmp/imdssa-release/"
           sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "sudo install -m 0750 /tmp/imdssa-release/deploy-control-plane.sh /opt/imds-super-admin/deploy-control-plane.sh && sudo /opt/imds-super-admin/deploy-control-plane.sh '${GITHUB_SHA}' /tmp/imdssa-release"
-      - name: Verify Super Admin authenticated runtime
+      - name: Verify Control Center authenticated runtime
         shell: bash
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
@@ -79,18 +80,18 @@ jobs:
           TOKEN="$(openssl rand -hex 32)"
           TOKEN_HASH="$(printf '%s' "$TOKEN" | sha256sum | awk '{print $1}')"
           ADMIN_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end, created_at limit 1")"
-          test -n "$ADMIN_ID"
+          PRODUCT_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.products where code='imds-marketing' limit 1")"
+          test -n "$ADMIN_ID" && test -n "$PRODUCT_ID"
           sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 --command="insert into app.auth_sessions(user_id,token_hash,expires_at) values ('$ADMIN_ID'::uuid,'$TOKEN_HASH',now()+interval '10 minutes')" >/dev/null
-          cleanup() {
-            sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$TOKEN_HASH'" >/dev/null 2>&1 || true
-          }
+          cleanup() { sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='$TOKEN_HASH'" >/dev/null 2>&1 || true; }
           trap cleanup EXIT
-          for route in /api/auth/me /api/v1/overview /api/v1/control-commands /api/v1/notifications /api/v1/settings/notifications/telegram /api/v1/access/users; do
+          for route in /api/auth/me /api/v1/overview /api/v1/control-commands /api/v1/notifications /api/v1/settings/notifications/telegram /api/v1/access/users "/api/v1/products/$PRODUCT_ID/commercial"; do
             curl -fsS --max-time 15 -H "Cookie: imdssa_session=$TOKEN" "$API$route" >/dev/null
           done
           sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.organization_memberships') is not null" | grep -q '^t$'
-          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.product_plans') is not null and to_regclass('app.product_module_commercial') is not null" | grep -q '^t$'
-          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select exists(select 1 from information_schema.columns where table_schema='app' and table_name='platform_users' and column_name='must_change_password')" | grep -q '^t$'
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.product_limit_catalog') is not null and to_regclass('app.product_module_prices') is not null and to_regclass('app.product_module_dependencies') is not null and to_regclass('app.product_plan_revisions') is not null" | grep -q '^t$'
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select exists(select 1 from app.modules where code='marketing.ai' and status='published')" | grep -q '^t$'
+          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select commercial_role from app.product_module_commercial c join app.modules m on m.id=c.module_id where m.code='marketing.voice-transcription'" | grep -q '^feature$'
           REMOTE
       - name: Verify local Marketing control channel
         shell: bash
@@ -104,44 +105,21 @@ jobs:
           set -euo pipefail
           source /etc/imds-platform-control.env
           test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
-
-          cleanup() {
-            rm -f /tmp/imds-platform-info.json /tmp/imds-platform-tenants.json
-          }
+          cleanup() { rm -f /tmp/imds-platform-info.json /tmp/imds-platform-tenants.json; }
           trap cleanup EXIT
-
-          curl -fsS --max-time 10 \
-            -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" \
-            http://127.0.0.1:8787/internal/platform/info \
-            -o /tmp/imds-platform-info.json
-          curl -fsS --max-time 10 \
-            -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" \
-            http://127.0.0.1:8787/internal/platform/tenants \
-            -o /tmp/imds-platform-tenants.json
-
+          curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info -o /tmp/imds-platform-info.json
+          curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/tenants -o /tmp/imds-platform-tenants.json
           python3 - <<'PY'
           import json
-
-          with open('/tmp/imds-platform-info.json', encoding='utf-8') as stream:
-              info = json.load(stream)
-          with open('/tmp/imds-platform-tenants.json', encoding='utf-8') as stream:
-              tenants = json.load(stream)
-
-          if info.get('product') != 'imds-marketing':
-              raise SystemExit(f"Unexpected product response: {info!r}")
-          if not isinstance(tenants.get('items'), list):
-              raise SystemExit(f"Unexpected tenants response: {tenants!r}")
-
+          with open('/tmp/imds-platform-info.json', encoding='utf-8') as stream: info=json.load(stream)
+          with open('/tmp/imds-platform-tenants.json', encoding='utf-8') as stream: tenants=json.load(stream)
+          if info.get('product') != 'imds-marketing': raise SystemExit(f"Unexpected product response: {info!r}")
+          if not isinstance(tenants.get('items'), list): raise SystemExit(f"Unexpected tenants response: {tenants!r}")
           print(f"marketing_product={info['product']}")
           print(f"marketing_tenants={len(tenants['items'])}")
           PY
-
-          reconcile_state="$(systemctl is-active imdssa-reconcile.timer)"
-          monitor_state="$(systemctl is-active imdssa-product-monitor.timer)"
-          echo "reconcile_timer=$reconcile_state"
-          echo "monitor_timer=$monitor_state"
-          test "$reconcile_state" = active
-          test "$monitor_state" = active
+          test "$(systemctl is-active imdssa-reconcile.timer)" = active
+          test "$(systemctl is-active imdssa-product-monitor.timer)" = active
           REMOTE
       - name: Verify public endpoint
         run: |
