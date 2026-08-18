@@ -40,8 +40,9 @@ chown root:imdssa "$ENV_DIR/telegram.env"; chmod 0640 "$ENV_DIR/telegram.env"
 systemctl stop imdssa-reconcile.timer imdssa-reconcile.service 2>/dev/null || true
 systemctl stop imdssa-product-monitor.timer imdssa-product-monitor.service 2>/dev/null || true
 systemctl stop imdssa-subscription-lifecycle.timer imdssa-subscription-lifecycle.service 2>/dev/null || true
+systemctl stop imdssa-billing-reconciliation.timer imdssa-billing-reconciliation.service 2>/dev/null || true
 install -d -o root -g postgres -m 0750 "$APP_DIR/migrations"
-for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql 005_registration_notifications.sql 005_security_hardening.sql 006_tenant_rbac.sql 007_notification_delivery_settings.sql 009_tenant_user_access.sql 010_product_commercial_catalog.sql 011_product_commercial_model.sql 012_organization_product_subscriptions.sql 014_billing_invoices_payments.sql 015_subscription_lifecycle.sql 016_paid_invoice_plan_application.sql 017_verified_provider_payments.sql; do
+for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql 005_registration_notifications.sql 005_security_hardening.sql 006_tenant_rbac.sql 007_notification_delivery_settings.sql 009_tenant_user_access.sql 010_product_commercial_catalog.sql 011_product_commercial_model.sql 012_organization_product_subscriptions.sql 014_billing_invoices_payments.sql 015_subscription_lifecycle.sql 016_paid_invoice_plan_application.sql 017_verified_provider_payments.sql 018_refunds_and_reconciliation.sql; do
   install -o root -g postgres -m 0640 "$STAGE_DIR/$migration" "$APP_DIR/migrations/$migration"
   sudo -u postgres psql --set=ON_ERROR_STOP=1 --dbname=imdssa --file="$APP_DIR/migrations/$migration"
 done
@@ -113,10 +114,12 @@ install -m 0644 "$STAGE_DIR/reconcile.service" /etc/systemd/system/imdssa-reconc
 install -m 0644 "$STAGE_DIR/reconcile.timer" /etc/systemd/system/imdssa-reconcile.timer
 install -m 0644 "$STAGE_DIR/subscription-lifecycle.service" /etc/systemd/system/imdssa-subscription-lifecycle.service
 install -m 0644 "$STAGE_DIR/subscription-lifecycle.timer" /etc/systemd/system/imdssa-subscription-lifecycle.timer
+install -m 0644 "$STAGE_DIR/billing-reconciliation.service" /etc/systemd/system/imdssa-billing-reconciliation.service
+install -m 0644 "$STAGE_DIR/billing-reconciliation.timer" /etc/systemd/system/imdssa-billing-reconciliation.timer
 nginx -t; systemctl daemon-reload
 systemctl enable imds-super-admin-api.service; systemctl restart imds-super-admin-api.service
-systemctl enable --now imdssa-product-monitor.timer; systemctl enable --now imdssa-reconcile.timer; systemctl enable --now imdssa-subscription-lifecycle.timer
-systemctl start imdssa-product-monitor.service || true; systemctl start imdssa-reconcile.service || true; systemctl start imdssa-subscription-lifecycle.service
+systemctl enable --now imdssa-product-monitor.timer; systemctl enable --now imdssa-reconcile.timer; systemctl enable --now imdssa-subscription-lifecycle.timer; systemctl enable --now imdssa-billing-reconciliation.timer
+systemctl start imdssa-product-monitor.service || true; systemctl start imdssa-reconcile.service || true; systemctl start imdssa-subscription-lifecycle.service; systemctl start imdssa-billing-reconciliation.service
 systemctl reload nginx
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then ufw allow 8080/tcp >/dev/null; fi
 for _ in $(seq 1 30); do if curl --fail --silent --show-error http://127.0.0.1:8788/healthz >/dev/null 2>&1; then break; fi; sleep 1; done
@@ -127,4 +130,5 @@ systemctl is-active --quiet postgresql
 systemctl is-active --quiet imdssa-product-monitor.timer
 systemctl is-active --quiet imdssa-reconcile.timer
 systemctl is-active --quiet imdssa-subscription-lifecycle.timer
+systemctl is-active --quiet imdssa-billing-reconciliation.timer
 sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select code||'|'||last_health::text from app.products where code='imds-marketing'" | grep -q '^imds-marketing|'
