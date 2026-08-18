@@ -33,15 +33,21 @@ if [ -z "$runtime_ready" ]; then
   exit 1
 fi
 
-ADMIN_ID="$(sudo -u postgres psql -d imdssa -At -c "select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end,created_at limit 1")"
-test -n "$ADMIN_ID"
+ADMIN_ID="$(sudo -u postgres psql -d imdssa -Atq -c "select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end,created_at limit 1" | head -1 | xargs)"
+[[ "$ADMIN_ID" =~ ^[0-9a-f-]{36}$ ]]
+echo 'SESSION_ADMIN_READY=success'
+
 SA_TOKEN="$(openssl rand -hex 32)"
 SA_HASH="$(printf '%s' "$SA_TOKEN" | sha256sum | awk '{print $1}')"
 SECOND_TOKEN="$(openssl rand -hex 32)"
 SECOND_HASH="$(printf '%s' "$SECOND_TOKEN" | sha256sum | awk '{print $1}')"
-SECOND_SESSION_ID="$(sudo -u postgres psql -d imdssa -At -c "insert into app.auth_sessions(user_id,token_hash,expires_at,source_ip,user_agent) values('$ADMIN_ID'::uuid,'$SECOND_HASH',now()+interval '10 minutes','127.0.0.1','IMDS E2E secondary') returning id")"
-sudo -u postgres psql -d imdssa -c "insert into app.auth_sessions(user_id,token_hash,expires_at,source_ip,user_agent) values('$ADMIN_ID'::uuid,'$SA_HASH',now()+interval '10 minutes','127.0.0.1','IMDS E2E current')" >/dev/null
+SECOND_SESSION_ID="$(sudo -u postgres psql -d imdssa -Atq -c "insert into app.auth_sessions(user_id,token_hash,expires_at,source_ip,user_agent) values('$ADMIN_ID'::uuid,'$SECOND_HASH',now()+interval '10 minutes','127.0.0.1','IMDS E2E secondary') returning id" | head -1 | xargs)"
+[[ "$SECOND_SESSION_ID" =~ ^[0-9a-f-]{36}$ ]]
+echo 'SESSION_SECOND_CREATED=success'
+
+sudo -u postgres psql -d imdssa -q -c "insert into app.auth_sessions(user_id,token_hash,expires_at,source_ip,user_agent) values('$ADMIN_ID'::uuid,'$SA_HASH',now()+interval '10 minutes','127.0.0.1','IMDS E2E current')" >/dev/null
 SA_COOKIE="Cookie: imdssa_session=$SA_TOKEN"
+echo 'SESSION_CURRENT_CREATED=success'
 
 MARKETING_HASH=''
 INSTALLATION_ID=''
@@ -50,7 +56,7 @@ TENANT_ID=''
 ORIGINAL_STATUS=''
 
 cleanup_auth() {
-  sudo -u postgres psql -d imdssa -c "delete from app.auth_sessions where token_hash in ('$SA_HASH','$SECOND_HASH')" >/dev/null 2>&1 || true
+  sudo -u postgres psql -d imdssa -q -c "delete from app.auth_sessions where token_hash in ('$SA_HASH','$SECOND_HASH')" >/dev/null 2>&1 || true
   if [ -n "$MARKETING_HASH" ]; then
     docker exec imds-postgres psql -U imds_owner -d imds_marketing -c "delete from public.imds_auth_sessions where token_hash='$MARKETING_HASH'" >/dev/null 2>&1 || true
   fi
@@ -83,10 +89,13 @@ restore() {
 trap restore EXIT
 
 sessions="$(curl -fsS -H "$SA_COOKIE" "$SA_API/api/auth/sessions")"
+session_count="$(printf '%s' "$sessions" | jq '.items|length')"
+current_count="$(printf '%s' "$sessions" | jq '[.items[]|select(.is_current==true)]|length')"
+echo "SESSION_LIST_READY count=$session_count current=$current_count"
 printf '%s' "$sessions" | jq -e --arg id "$SECOND_SESSION_ID" '.items|map(select(.id==$id))|length==1' >/dev/null
 printf '%s' "$sessions" | jq -e '.items|map(select(.is_current==true))|length>=1' >/dev/null
 curl -fsS -H "$SA_COOKIE" -X DELETE "$SA_API/api/auth/sessions/$SECOND_SESSION_ID" | jq -e '.revoked==true' >/dev/null
-sudo -u postgres psql -d imdssa -At -c "select count(*) from app.auth_sessions where id='$SECOND_SESSION_ID'::uuid" | grep -q '^0$'
+sudo -u postgres psql -d imdssa -Atq -c "select count(*) from app.auth_sessions where id='$SECOND_SESSION_ID'::uuid" | head -1 | xargs | grep -q '^0$'
 echo 'SESSION_MANAGEMENT=success'
 
 installations="$(curl -fsS -H "$SA_COOKIE" "$SA_API/api/v1/installations")"
@@ -96,17 +105,20 @@ ORIGINAL_STATUS="$(printf '%s' "$installations" | jq -r --arg id "$INSTALLATION_
 [[ "$INSTALLATION_ID" =~ ^[0-9a-f-]{36}$ ]]
 [[ "$ORGANIZATION_ID" =~ ^[0-9a-f-]{36}$ ]]
 test "$ORIGINAL_STATUS" = active -o "$ORIGINAL_STATUS" = suspended
+echo "CONTROL_TARGET_READY original=$ORIGINAL_STATUS"
 
 source /etc/imds-platform-control.env
 remote_state="$(curl -fsS -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" "$MARKETING_API/internal/platform/state")"
 TENANT_ID="$(printf '%s' "$remote_state" | jq -r --arg org "$ORGANIZATION_ID" '.tenants|to_entries[]|select(.value.organizationId==$org)|.key' | head -1)"
 [[ "$TENANT_ID" =~ ^[0-9a-f-]{36}$ ]]
+echo 'MARKETING_TENANT_READY=success'
 
-MARKETING_USER_ID="$(docker exec imds-postgres psql -U imds_owner -d imds_marketing -At -c "select id from public.imds_auth_users where lower(email)='admin@imds.kz' and status='active' limit 1")"
-test -n "$MARKETING_USER_ID"
+MARKETING_USER_ID="$(docker exec imds-postgres psql -U imds_owner -d imds_marketing -Atq -c "select id from public.imds_auth_users where lower(email)='admin@imds.kz' and status='active' limit 1" | head -1 | xargs)"
+[[ "$MARKETING_USER_ID" =~ ^[0-9a-f-]{36}$ ]]
 MARKETING_TOKEN="$(openssl rand -hex 48)"
 MARKETING_HASH="$(printf '%s' "$MARKETING_TOKEN" | sha256sum | awk '{print $1}')"
-docker exec imds-postgres psql -U imds_owner -d imds_marketing -c "insert into public.imds_auth_sessions(user_id,token_hash,remember_me,expires_at) values('$MARKETING_USER_ID'::uuid,'$MARKETING_HASH',false,now()+interval '10 minutes')" >/dev/null
+docker exec imds-postgres psql -U imds_owner -d imds_marketing -q -c "insert into public.imds_auth_sessions(user_id,token_hash,remember_me,expires_at) values('$MARKETING_USER_ID'::uuid,'$MARKETING_HASH',false,now()+interval '10 minutes')" >/dev/null
+echo 'MARKETING_SESSION_READY=success'
 
 revision() {
   curl -fsS -H "$SA_COOKIE" "$SA_API/api/v1/organization-products" | jq -r --arg org "$ORGANIZATION_ID" '.items[]|select(.organization_id==$org and .product_code=="imds-marketing")|.desired_revision'
@@ -138,7 +150,7 @@ assert_synced() {
     browser_enabled="$(printf '%s' "$browser" | jq -r --arg code "$MODULE_CODE" '.modules[$code]')"
     browser_revision="$(printf '%s' "$browser" | jq -r '.revision')"
 
-    command_status="$(sudo -u postgres psql -d imdssa -At -c "select c.status from app.control_commands c join app.products p on p.id=c.product_id where c.organization_id='$ORGANIZATION_ID'::uuid and p.code='imds-marketing' and c.desired_revision=$desired::bigint order by c.created_at desc limit 1" | xargs)"
+    command_status="$(sudo -u postgres psql -d imdssa -Atq -c "select c.status from app.control_commands c join app.products p on p.id=c.product_id where c.organization_id='$ORGANIZATION_ID'::uuid and p.code='imds-marketing' and c.desired_revision=$desired::bigint order by c.created_at desc limit 1" | head -1 | xargs)"
 
     echo "E2E_STATE attempt=$attempt expected=$expected desired=$desired actual=$actual install_sync=$installation_sync applied=$applied_revision binding_actual=$binding_actual binding_sync=$binding_sync remote=$remote_enabled remote_revision=$remote_revision browser=$browser_enabled browser_revision=$browser_revision command=$command_status"
 
