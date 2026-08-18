@@ -112,6 +112,32 @@ CREATE TRIGGER billing_invoice_apply_pending_plan
 AFTER UPDATE OF status ON app.billing_invoices
 FOR EACH ROW EXECUTE FUNCTION app.trg_apply_paid_invoice_pending_plan();
 
+-- Product subscriptions in Control Center are the commercial source of truth.
+-- Any direct commercial change must enqueue a fresh desired-state revision for the product adapter.
+CREATE OR REPLACE FUNCTION app.trg_queue_subscription_commercial_sync()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path=app,pg_temp
+AS $$
+DECLARE
+  organization_id uuid;
+  product_id uuid;
+BEGIN
+  organization_id := CASE WHEN TG_OP='DELETE' THEN OLD.organization_id ELSE NEW.organization_id END;
+  product_id := CASE WHEN TG_OP='DELETE' THEN OLD.product_id ELSE NEW.product_id END;
+  PERFORM app.queue_product_sync(organization_id,product_id,'product_subscription.' || lower(TG_OP));
+  RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS control_sync_product_subscriptions ON app.product_subscriptions;
+CREATE TRIGGER control_sync_product_subscriptions
+AFTER INSERT OR UPDATE OF plan_id,plan_revision,status,billing_period_months,currency,base_price_kzt,addons_price_kzt,custom_price_kzt,payment_method,renewal_mode,trial_ends_at,current_period_end,grace_ends_at,access_ends_at,limits OR DELETE
+ON app.product_subscriptions
+FOR EACH ROW EXECUTE FUNCTION app.trg_queue_subscription_commercial_sync();
+
 GRANT EXECUTE ON FUNCTION app.apply_paid_invoice_pending_plan(uuid) TO imdssa_app;
+GRANT EXECUTE ON FUNCTION app.trg_queue_subscription_commercial_sync() TO imdssa_app;
 
 COMMIT;
