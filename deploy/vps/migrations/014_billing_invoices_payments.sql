@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS app.billing_payments (
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE NULLS NOT DISTINCT (organization_id, external_reference)
+  UNIQUE (organization_id, external_reference)
 );
 
 CREATE TABLE IF NOT EXISTS app.billing_payment_allocations (
