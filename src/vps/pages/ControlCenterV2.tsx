@@ -23,6 +23,7 @@ import { SubscriptionsPage } from './subscriptions/SubscriptionsPage';
 import { BillingPage } from './billing/BillingPage';
 import { SyncPage } from './sync/SyncPage';
 import { EventsPage, type RealtimeFeedEvent } from './events/EventsPage';
+import { UsersPage } from './users/UsersPage';
 import type { ControlCenterTab, ControlCommand, Installation, Module, Organization, OrganizationProduct, Overview, Product, RealtimeState, User } from '../controlCenter';
 import { api } from '../controlCenter';
 import './controlCenterV2.css';
@@ -47,14 +48,13 @@ const administrationNavigation: NavigationItem[] = [
   { id: 'settings', label: 'Настройки', description: 'Уведомления и defaults', icon: Settings2 },
 ];
 
-const moduleSpecs: Record<Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events'>, { kicker: string; title: string; text: string; fields: string[] }> = {
+const moduleSpecs: Record<Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events' | 'users'>, { kicker: string; title: string; text: string; fields: string[] }> = {
   registrations: { kicker: 'ONBOARDING', title: 'Регистрации', text: 'Входящие регистрации из продуктов до создания или связывания организации.', fields: ['Источник регистрации', 'Компания и владелец', 'Контакты', 'Trial', 'Дата регистрации', 'Статус обработки'] },
-  users: { kicker: 'ACCESS CONTROL', title: 'Пользователи и доступ', text: 'Platform и tenant пользователи, роли и области доступа.', fields: ['Пользователь', 'Роль', 'Организации', 'Продукты и модули', 'Last login', 'Активные сессии'] },
   security: { kicker: 'SECURITY', title: 'Безопасность', text: 'Управление сессиями, паролями и событиями доступа.', fields: ['Активные устройства', 'IP / user agent', 'Последняя активность', 'Истечение сессии', 'Login attempts', 'Смена пароля'] },
   settings: { kicker: 'CONTROL CENTER', title: 'Настройки', text: 'Бизнес-настройки Control Center без серверных secrets.', fields: ['Telegram уведомления', 'Notification routing', 'Commercial defaults', 'Trial defaults', 'Системные параметры', 'Audit изменений'] },
 };
 
-function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events'>; onOpenLegacy: () => void }) {
+function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, 'overview' | 'organizations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events' | 'users'>; onOpenLegacy: () => void }) {
   const spec = moduleSpecs[tab];
   return <section className="ccv2-module">
     <div className="ccv2-module-intro"><div><span>{spec.kicker}</span><h2>{spec.title}</h2><p>{spec.text}</p></div><button type="button" onClick={onOpenLegacy}>Открыть текущий рабочий экран</button></div>
@@ -135,7 +135,6 @@ export function ControlCenterV2() {
   const canManage = Boolean(user?.scope === 'platform' && ['platform_owner', 'platform_admin'].includes(user.role));
 
   const openLegacy = (target: ControlCenterTab) => {
-    if (target === 'users') { window.location.href = '/'; return; }
     const index = legacyTabIndex[target];
     if (typeof index === 'number') sessionStorage.setItem('imdssa:legacy-tab-index', String(index));
     window.location.href = '/';
@@ -164,7 +163,8 @@ export function ControlCenterV2() {
       {tab === 'billing' && user.scope === 'platform' && <BillingPage organizations={organizations} canManage={canManage} />}
       {tab === 'sync' && <SyncPage organizationProducts={organizationProducts} commands={commands} canManage={canManage} onChanged={refresh} />}
       {tab === 'events' && <EventsPage user={user} realtimeEvents={realtimeEvents} commands={commands} organizations={organizations} products={products} realtimeState={realtimeState} />}
-      {tab !== 'overview' && tab !== 'organizations' && tab !== 'products' && tab !== 'modules' && tab !== 'subscriptions' && tab !== 'billing' && tab !== 'sync' && tab !== 'events' && <ModuleLanding tab={tab} onOpenLegacy={() => openLegacy(tab)} />}
+      {tab === 'users' && <UsersPage user={user} organizations={organizations} products={products} modules={modules} />}
+      {tab !== 'overview' && tab !== 'organizations' && tab !== 'products' && tab !== 'modules' && tab !== 'subscriptions' && tab !== 'billing' && tab !== 'sync' && tab !== 'events' && tab !== 'users' && <ModuleLanding tab={tab} onOpenLegacy={() => openLegacy(tab)} />}
     </main>
   </div>;
 }
