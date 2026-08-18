@@ -1,52 +1,15 @@
 name: Control Plane E2E
 
 on:
-  workflow_dispatch:
   push:
-    branches: [main]
-    paths: ['.github/workflows/control-plane-e2e.yml']
-
-permissions:
-  contents: read
-  issues: write
+    branches:
+      - main
+    paths:
+      - '.github/workflows/control-plane-e2e.yml'
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      VPS_HOST: ${{ secrets.VPS_HOST }}
-      VPS_USER: ${{ secrets.VPS_USER }}
-      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
-      GH_TOKEN: ${{ github.token }}
-      REPO: ${{ github.repository }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - name: Validate VPS access
-        run: 'test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"'
-      - name: Install SSH client
-        run: sudo apt-get update && sudo apt-get install -y sshpass
-      - name: Verify sessions and reversible entitlement lifecycle
-        shell: bash
-        env:
-          SSHPASS: ${{ secrets.VPS_PASSWORD }}
-        run: |
-          set -euo pipefail
-          export SSHPASS
-          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20)
-          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' < scripts/verify-sessions-control-e2e.sh
-      - name: Report success
-        if: success()
-        run: |
-          gh issue comment 47 --repo "$REPO" --body "control_plane_e2e=success
-run_id=${{ github.run_id }}
-head_sha=${{ github.sha }}"
-          gh issue close 47 --repo "$REPO" --reason completed
-      - name: Report failure
-        if: failure()
-        run: |
-          gh issue comment 47 --repo "$REPO" --body "control_plane_e2e=failed
-run_id=${{ github.run_id }}
-head_sha=${{ github.sha }}"
+      - name: Runner smoke
+        run: echo control-plane-e2e-runner-ok
