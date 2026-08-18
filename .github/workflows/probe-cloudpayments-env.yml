@@ -1,0 +1,61 @@
+name: Probe CloudPayments Environment
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/probe-cloudpayments-env.yml
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Search existing VPS env files without exposing values
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          OUTPUT="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          has_pair() {
+            local file="$1"
+            [ -r "$file" ] || { echo false; return; }
+            local pub sec
+            pub="$(sed -n 's/^CLOUDPAYMENTS_PUBLIC_ID=//p' "$file" | tail -n1)"
+            sec="$(sed -n 's/^CLOUDPAYMENTS_API_SECRET=//p' "$file" | tail -n1)"
+            if [ -n "$pub" ] && [ -n "$sec" ]; then echo true; else echo false; fi
+          }
+          printf 'cloud_file=%s\n' "$(has_pair /etc/imds-cloudpayments.env)"
+          printf 'marketing_env=%s\n' "$(has_pair /etc/imds-marketing.env)"
+          printf 'control_api_env=%s\n' "$(has_pair /etc/imds-super-admin/api.env)"
+          printf 'provider_env=%s\n' "$(has_pair /etc/imds-billing-provider.env)"
+          REMOTE
+          )"
+          printf '%s\n' "$OUTPUT"
+          value() { printf '%s\n' "$OUTPUT" | sed -n "s/^$1=//p"; }
+          cloud="$(value cloud_file)"; marketing="$(value marketing_env)"; api="$(value control_api_env)"; provider="$(value provider_env)"
+          found=false
+          for v in "$cloud" "$marketing" "$api" "$provider"; do [ "$v" = true ] && found=true; done
+          state=failure; description='CloudPayments credentials not found in existing VPS env files'
+          if [ "$found" = true ]; then state=success; description='CloudPayments credentials found in existing VPS configuration'; fi
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$(jq -nc --arg state "$state" --arg context 'imdssa/cloudpayments-env-discovery' --arg description "$description" '{state:$state,context:$context,description:$description}')" >/dev/null
+          if [ "$cloud" = true ]; then s=success; else s=failure; fi
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "$(jq -nc --arg state "$s" --arg context 'imdssa/cloudpayments-primary-env' --arg description 'Primary /etc/imds-cloudpayments.env credential pair' '{state:$state,context:$context,description:$description}')" >/dev/null
