@@ -1,6 +1,6 @@
 export type User = { id: string; email: string; fullName: string; role: string; scope: 'platform' | 'tenant'; memberships?: Array<{ organizationId: string; role: string }> };
 export type Overview = { organizations: number; products: number; modules: number; installations: number; platform_users: number; sync_pending: number };
-export type Organization = { id: string; name: string; legal_name: string | null; bin: string | null; city: string | null; status: string; products?: number; modules?: number };
+export type Organization = { id: string; name: string; legal_name: string | null; bin: string | null; city: string | null; status: string; products?: number; modules?: number; created_at?: string | null; updated_at?: string | null };
 export type Product = { id: string; code: string; name: string; status: string; version: string | null; last_health: string; last_heartbeat_at: string | null; last_latency_ms?: number | null; last_error?: string | null; tenants: number };
 export type Module = { id: string; code: string; name: string; status: string; current_version: string | null; owner_product_id: string | null; owner_product_name: string | null; category: string };
 export type Installation = { id: string; organization_id: string; module_id: string; host_product_id: string; organization_name: string; module_code: string; module_name: string; host_product_name: string; status: string; health: string; version: string | null; actual_enabled: boolean | null; sync_status: string; last_applied_revision: number | null; updated_at: string };
@@ -13,6 +13,7 @@ export const statusLabels: Record<string, string> = {
   active: 'Активен', suspended: 'Отключён', disabled: 'Отключён', published: 'Доступен', pending: 'Ожидание', synced: 'Синхронизировано',
   applying: 'Применяется', applied: 'Применено', completed: 'Выполнено', failed: 'Ошибка', retry: 'Повтор', healthy: 'Работает', degraded: 'Деградация',
   unavailable: 'Недоступен', unknown: 'Нет данных', offline: 'Офлайн', maintenance: 'Техработы', draft: 'Черновик', archived: 'Архив', read_only: 'Только чтение',
+  issued: 'Выставлен', partially_paid: 'Частично оплачен', paid: 'Оплачен', overdue: 'Просрочен', trial: 'Trial', pending_payment: 'Ожидает оплаты', past_due: 'Просрочена', grace: 'Grace period', expired: 'Истекла', canceled: 'Отменена', free: 'Бесплатно', beta: 'Beta',
 };
 
 export const categoryLabels: Record<string, string> = {
