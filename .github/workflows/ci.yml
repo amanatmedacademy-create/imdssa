@@ -39,6 +39,12 @@ jobs:
       - name: Type check Superadmin Web
         run: npm run lint
 
+      - name: Type check VPS Control Center API
+        run: npm run lint --workspace @imds/vps-api
+
+      - name: Build VPS Control Center API
+        run: npm run build --workspace @imds/vps-api
+
       - name: Type check platform contracts
         run: npm run lint --workspace @imds/platform-types
 
