@@ -26,6 +26,7 @@ jobs:
         with:
           node-version: 22
       - name: Validate source
+        id: source
         shell: bash
         env:
           VITE_RUNTIME: vps
@@ -33,15 +34,18 @@ jobs:
           VITE_APP_VERSION: 0.8.0
           IMDS_STRICT_ENV: 'true'
         run: |
-          set -euo pipefail
-          npm install --no-audit --no-fund
-          npm run lint --workspace @imds/vps-api
-          npm run build --workspace @imds/vps-api
-          npm run lint
-          npm run build
+          set -o pipefail
+          {
+            npm install --no-audit --no-fund &&
+            npm run lint --workspace @imds/vps-api &&
+            npm run build --workspace @imds/vps-api &&
+            npm run lint &&
+            npm run build
+          } 2>&1 | tee /tmp/product-commercial-source.log
       - name: Install SSH client
         run: sudo apt-get update && sudo apt-get install -y sshpass
       - name: Verify live product commercial runtime
+        id: production
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         shell: bash
@@ -52,7 +56,7 @@ jobs:
           SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
           success=''
           for _ in $(seq 1 90); do
-            if sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+            if sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE' | tee /tmp/product-commercial-production.log
           set -euo pipefail
           API=http://127.0.0.1:8788
           systemctl is-active --quiet imds-super-admin-api.service
@@ -85,14 +89,35 @@ jobs:
           done
           test "$success" = 1
       - name: Record verification
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p docs/internal
           printf 'product_commercial_production=passed\nverified_from=%s\n' "$GITHUB_SHA" > docs/internal/product-commercial-production.ok
+          rm -f docs/internal/product-commercial-production.failed
           git config user.name 'IMDS Automation'
           git config user.email 'automation@imds.local'
-          git add docs/internal/product-commercial-production.ok
+          git add docs/internal/product-commercial-production.ok docs/internal/product-commercial-production.failed 2>/dev/null || true
           git commit -m 'record product commercial production verification'
           git pull --rebase origin main
           git push origin HEAD:main
+      - name: Record verification failure
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p docs/internal
+          {
+            echo 'product_commercial_production=failed'
+            echo "verified_from=$GITHUB_SHA"
+            echo '--- source tail ---'
+            tail -n 100 /tmp/product-commercial-source.log 2>/dev/null || true
+            echo '--- production tail ---'
+            tail -n 100 /tmp/product-commercial-production.log 2>/dev/null || true
+          } > docs/internal/product-commercial-production.failed
+          git config user.name 'IMDS Automation'
+          git config user.email 'automation@imds.local'
+          git add docs/internal/product-commercial-production.failed
+          git commit -m 'record product commercial production verification failure' || true
+          git pull --rebase origin main || true
+          git push origin HEAD:main || true
