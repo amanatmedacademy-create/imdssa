@@ -1,0 +1,105 @@
+name: Resync Marketing Entitlements V4
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/resync-marketing-entitlements-v4.yml
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: resync-marketing-entitlements-v4
+  cancel-in-progress: false
+
+jobs:
+  resync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Queue current Marketing desired state and reconcile
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=20 -o ServerAliveCountMax=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          source /etc/imds-platform-control.env
+          test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
+
+          PRODUCT_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.products where code='imds-marketing' limit 1")"
+          test -n "$PRODUCT_ID"
+          SUBSCRIPTION_COUNT="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select count(*) from app.product_subscriptions where product_id='$PRODUCT_ID'::uuid")"
+          test "$SUBSCRIPTION_COUNT" -gt 0
+
+          sudo -u postgres psql --dbname=imdssa --set=ON_ERROR_STOP=1 --command="
+            select app.queue_product_sync(s.organization_id,s.product_id,'marketing.runtime-v4-resync')
+            from app.product_subscriptions s
+            where s.product_id='$PRODUCT_ID'::uuid;
+          " >/dev/null
+
+          systemctl start imdssa-reconcile.service
+          if systemctl is-failed --quiet imdssa-reconcile.service; then
+            journalctl -u imdssa-reconcile.service -n 20 --no-pager
+            exit 1
+          fi
+
+          TOTAL="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select count(*) from app.product_tenant_bindings where product_id='$PRODUCT_ID'::uuid")"
+          SYNCED="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select count(*) from app.product_tenant_bindings where product_id='$PRODUCT_ID'::uuid and sync_status='synced' and actual_revision=desired_revision and last_error is null")"
+          FAILED="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select count(*) from app.product_tenant_bindings where product_id='$PRODUCT_ID'::uuid and (sync_status<>'synced' or actual_revision<>desired_revision or last_error is not null)")"
+          printf 'subscriptions=%s bindings=%s synced=%s failed=%s\n' "$SUBSCRIPTION_COUNT" "$TOTAL" "$SYNCED" "$FAILED"
+          test "$TOTAL" -gt 0
+          test "$FAILED" -eq 0
+          test "$SYNCED" -eq "$TOTAL"
+
+          while IFS='|' read -r ORG TENANT DESIRED ACTUAL STATUS SUBSTATUS; do
+            [ -n "$TENANT" ] || { echo "Binding without remote tenant for organization $ORG"; exit 1; }
+            STATE="$(curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" "http://127.0.0.1:8787/internal/platform/state?tenantId=$TENANT")"
+            printf '%s' "$STATE" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("tenant"), data' 
+            STATE_ORG="$(printf '%s' "$STATE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tenant"]["organizationId"])')"
+            STATE_REV="$(printf '%s' "$STATE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tenant"]["revision"])')"
+            BILLING_STATUS="$(printf '%s' "$STATE" | python3 -c 'import json,sys; t=json.load(sys.stdin)["tenant"]; print((t.get("billing") or {}).get("subscriptionStatus") or "none")')"
+            test "$STATE_ORG" = "$ORG"
+            test "$STATE_REV" -ge "$ACTUAL"
+            if [ "$SUBSTATUS" = canceled ]; then EXPECTED=cancelled; else EXPECTED="$SUBSTATUS"; fi
+            if [ "$EXPECTED" != "" ] && [ "$EXPECTED" != "none" ]; then test "$BILLING_STATUS" = "$EXPECTED"; fi
+            printf 'organization=%s tenant=%s revision=%s billing=%s\n' "$ORG" "$TENANT" "$STATE_REV" "$BILLING_STATUS"
+          done < <(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --field-separator='|' --command="
+            select b.organization_id,b.remote_tenant_id,b.desired_revision,b.actual_revision,b.sync_status,coalesce(s.status::text,'')
+            from app.product_tenant_bindings b
+            left join app.product_subscriptions s on s.organization_id=b.organization_id and s.product_id=b.product_id
+            where b.product_id='$PRODUCT_ID'::uuid
+            order by b.organization_id;
+          ")
+          REMOTE
+
+      - name: Publish entitlement resync status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          state=failure
+          description='Marketing entitlement v4 resync failed'
+          if [ "$JOB_STATUS" = success ]; then state=success; description='Marketing entitlements synced end-to-end'; fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$(jq -nc --arg state "$state" --arg context 'imdssa/marketing-entitlement-e2e' --arg description "$description" '{state:$state,context:$context,description:$description}')" >/dev/null
