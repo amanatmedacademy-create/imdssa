@@ -11,9 +11,9 @@ export type ControlCenterTab = 'overview' | 'organizations' | 'registrations' | 
 
 export const statusLabels: Record<string, string> = {
   active: 'Активен', suspended: 'Отключён', disabled: 'Отключён', published: 'Доступен', pending: 'Ожидание', synced: 'Синхронизировано',
-  applying: 'Применяется', applied: 'Применено', completed: 'Выполнено', failed: 'Ошибка', retry: 'Повтор', healthy: 'Работает', degraded: 'Деградация',
+  applying: 'Применяется', applied: 'Применено', completed: 'Выполнено', succeeded: 'Выполнено', failed: 'Ошибка', retry: 'Повтор', healthy: 'Работает', degraded: 'Деградация',
   unavailable: 'Недоступен', unknown: 'Нет данных', offline: 'Офлайн', maintenance: 'Техработы', draft: 'Черновик', archived: 'Архив', read_only: 'Только чтение',
-  issued: 'Выставлен', partially_paid: 'Частично оплачен', paid: 'Оплачен', overdue: 'Просрочен', trial: 'Trial', pending_payment: 'Ожидает оплаты', past_due: 'Просрочена', grace: 'Grace period', expired: 'Истекла', canceled: 'Отменена', free: 'Бесплатно', beta: 'Beta',
+  issued: 'Выставлен', partially_paid: 'Частично оплачен', paid: 'Оплачен', overdue: 'Просрочен', trial: 'Trial', pending_payment: 'Ожидает оплаты', past_due: 'Просрочена', grace: 'Льготный период', expired: 'Истекла', canceled: 'Отменена', free: 'Бесплатно', beta: 'Beta',
 };
 
 export const categoryLabels: Record<string, string> = {
