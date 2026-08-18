@@ -8,13 +8,30 @@ MARKETING_API='http://127.0.0.1:8787'
 ORGANIZATION_NAME='Amanat Med Academy'
 MODULE_CODE='marketing.analytics'
 
-systemctl is-active --quiet imds-super-admin-api.service
-systemctl is-active --quiet imdssa-reconcile.timer
-systemctl is-active --quiet imdssa-product-monitor.timer
-test -f /opt/imds-super-admin/api/dist/sessionRoutes.js
-grep -q '/api/auth/sessions' /opt/imds-super-admin/api/dist/sessionRoutes.js
-grep -R -q 'Активные устройства' /var/www/imds-super-admin/current/assets
-curl -fsS "$SA_API/healthz" >/dev/null
+runtime_ready=''
+for attempt in $(seq 1 120); do
+  if systemctl is-active --quiet imds-super-admin-api.service \
+    && systemctl is-active --quiet imdssa-reconcile.timer \
+    && systemctl is-active --quiet imdssa-product-monitor.timer \
+    && test -f /opt/imds-super-admin/api/dist/sessionRoutes.js \
+    && grep -q '/api/auth/sessions' /opt/imds-super-admin/api/dist/sessionRoutes.js \
+    && grep -R -q 'Активные устройства' /var/www/imds-super-admin/current/assets 2>/dev/null \
+    && curl -fsS "$SA_API/healthz" >/dev/null 2>&1; then
+    runtime_ready=1
+    echo "RUNTIME_READY attempts=$attempt"
+    break
+  fi
+  if [ $((attempt % 10)) -eq 0 ]; then
+    echo "WAIT_RUNTIME attempt=$attempt api=$(systemctl is-active imds-super-admin-api.service 2>/dev/null || true) reconcile=$(systemctl is-active imdssa-reconcile.timer 2>/dev/null || true) monitor=$(systemctl is-active imdssa-product-monitor.timer 2>/dev/null || true) session_routes=$(test -f /opt/imds-super-admin/api/dist/sessionRoutes.js && echo yes || echo no)"
+  fi
+  sleep 2
+done
+if [ -z "$runtime_ready" ]; then
+  echo 'RUNTIME_NOT_READY' >&2
+  ls -la /opt/imds-super-admin/api/dist/sessionRoutes.js 2>/dev/null || true
+  systemctl --no-pager --full status imds-super-admin-api.service || true
+  exit 1
+fi
 
 ADMIN_ID="$(sudo -u postgres psql -d imdssa -At -c "select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by case global_role when 'platform_owner' then 0 else 1 end,created_at limit 1")"
 test -n "$ADMIN_ID"
