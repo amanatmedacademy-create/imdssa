@@ -1,0 +1,118 @@
+name: Deploy Marketing VPS Bridge
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-marketing-vps-bridge.yml
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: deploy-marketing-vps-bridge
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+      MARKETING_SHA: 6c965b6887a9e0d273a11fab86d6387ee6015062
+    steps:
+      - name: Validate access
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          test -n "$VPS_PASSWORD"
+          test -n "$MARKETING_SHA"
+
+      - name: Checkout Marketing tested revision
+        uses: actions/checkout@v4
+        with:
+          repository: amanatmedacademy-create/marketing
+          ref: ${{ env.MARKETING_SHA }}
+          path: marketing
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify Marketing source
+        working-directory: marketing
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run test:billing
+          npm run test:fail-closed
+          npm run typecheck
+          npm run build
+
+      - name: Package Marketing release
+        working-directory: marketing
+        run: |
+          set -euo pipefail
+          tar --exclude=.git --exclude=node_modules --exclude=.env --exclude=.env.local -czf /tmp/imds-marketing-release.tgz .
+
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Upload and install Marketing release
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=20 -o ServerAliveCountMax=30)
+          sshpass -e scp "${SSH_ARGS[@]}" marketing/deploy/vps/bootstrap-host.sh "$VPS_USER@$VPS_HOST:/tmp/imds-bootstrap.sh"
+          sshpass -e scp "${SSH_ARGS[@]}" marketing/deploy/vps/install-release.sh "$VPS_USER@$VPS_HOST:/tmp/imds-install-release.sh"
+          sshpass -e scp "${SSH_ARGS[@]}" /tmp/imds-marketing-release.tgz "$VPS_USER@$VPS_HOST:/tmp/imds-marketing-release.tgz"
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" '
+            set -euo pipefail
+            chmod 700 /tmp/imds-bootstrap.sh /tmp/imds-install-release.sh
+            /tmp/imds-bootstrap.sh
+            /tmp/imds-install-release.sh /tmp/imds-marketing-release.tgz 6c965b6887a9
+          '
+
+      - name: Verify centralized subscription runtime
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          source /etc/imds-platform-control.env
+          test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
+          systemctl is-active --quiet imds-marketing
+          INFO="$(curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info)"
+          printf '%s' "$INFO" | grep -q '"protocol":4'
+          printf '%s' "$INFO" | grep -q 'fail-closed-managed-organization-scope'
+          grep -q '^Environment=IMDS_BILLING_CONTROL_URL=http://127.0.0.1:8788$' /etc/systemd/system/imds-marketing.service
+          curl -fsS --max-time 10 http://127.0.0.1:8787/api/health >/dev/null
+          REMOTE
+
+      - name: Publish bridge status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          state=failure
+          description='Marketing VPS bridge failed'
+          if [ "$JOB_STATUS" = success ]; then state=success; description='Marketing VPS protocol 4 verified'; fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "{\"state\":\"$state\",\"context\":\"imdssa/marketing-vps-bridge\",\"description\":\"$description\"}"
