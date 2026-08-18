@@ -7,7 +7,6 @@ import {
   CreditCard,
   FileCheck2,
   Layers3,
-  LockKeyhole,
   PackageCheck,
   ServerCog,
   Settings2,
@@ -26,6 +25,7 @@ import { SyncPage } from './sync/SyncPage';
 import { EventsPage, type RealtimeFeedEvent } from './events/EventsPage';
 import { UsersPage } from './users/UsersPage';
 import { SecurityPage } from './security/SecurityPage';
+import { SettingsPage } from './settings/SettingsPage';
 import type { ControlCenterTab, ControlCommand, Installation, Module, Organization, OrganizationProduct, Overview, Product, RealtimeState, User } from '../controlCenter';
 import { api } from '../controlCenter';
 import './controlCenterV2.css';
@@ -49,21 +49,6 @@ const administrationNavigation: NavigationItem[] = [
   { id: 'security', label: 'Безопасность', description: 'Сессии и пароль', icon: ShieldCheck },
   { id: 'settings', label: 'Настройки', description: 'Уведомления и defaults', icon: Settings2 },
 ];
-
-const moduleSpecs: Record<Exclude<ControlCenterTab, 'overview' | 'organizations' | 'registrations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events' | 'users' | 'security'>, { kicker: string; title: string; text: string; fields: string[] }> = {
-  settings: { kicker: 'CONTROL CENTER', title: 'Настройки', text: 'Бизнес-настройки Control Center без серверных secrets.', fields: ['Telegram уведомления', 'Notification routing', 'Commercial defaults', 'Trial defaults', 'Системные параметры', 'Audit изменений'] },
-};
-
-function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, 'overview' | 'organizations' | 'registrations' | 'products' | 'modules' | 'subscriptions' | 'billing' | 'sync' | 'events' | 'users' | 'security'>; onOpenLegacy: () => void }) {
-  const spec = moduleSpecs[tab];
-  return <section className="ccv2-module">
-    <div className="ccv2-module-intro"><div><span>{spec.kicker}</span><h2>{spec.title}</h2><p>{spec.text}</p></div><button type="button" onClick={onOpenLegacy}>Открыть текущий рабочий экран</button></div>
-    <div className="ccv2-module-grid">{spec.fields.map((field) => <article key={field}><span>Показываем</span><strong>{field}</strong></article>)}</div>
-    <div className="ccv2-migration-note"><LockKeyhole size={18} /><div><strong>Модуль выделен в отдельный контур.</strong><p>До завершения переноса его рабочие действия остаются в текущем production-экране. Данные и API не дублируются.</p></div></div>
-  </section>;
-}
-
-const legacyTabIndex: Partial<Record<ControlCenterTab, number>> = { settings: 9 };
 
 export function ControlCenterV2() {
   const [user, setUser] = useState<User | null>(null);
@@ -130,12 +115,6 @@ export function ControlCenterV2() {
   const visibleAdministration = useMemo(() => user?.scope === 'tenant' ? administrationNavigation.filter((item) => item.id !== 'settings') : administrationNavigation, [user?.scope]);
   const canManage = Boolean(user?.scope === 'platform' && ['platform_owner', 'platform_admin'].includes(user.role));
 
-  const openLegacy = (target: ControlCenterTab) => {
-    const index = legacyTabIndex[target];
-    if (typeof index === 'number') sessionStorage.setItem('imdssa:legacy-tab-index', String(index));
-    window.location.href = '/';
-  };
-
   if (loading) return <main className="ccv2-state">Загрузка Control Center…</main>;
   if (!user) return <main className="ccv2-state"><strong>Требуется авторизация</strong><a href="/">Перейти ко входу</a></main>;
 
@@ -162,7 +141,7 @@ export function ControlCenterV2() {
       {tab === 'events' && <EventsPage user={user} realtimeEvents={realtimeEvents} commands={commands} organizations={organizations} products={products} realtimeState={realtimeState} />}
       {tab === 'users' && <UsersPage user={user} organizations={organizations} products={products} modules={modules} />}
       {tab === 'security' && <SecurityPage user={user} />}
-      {tab !== 'overview' && tab !== 'organizations' && tab !== 'registrations' && tab !== 'products' && tab !== 'modules' && tab !== 'subscriptions' && tab !== 'billing' && tab !== 'sync' && tab !== 'events' && tab !== 'users' && tab !== 'security' && <ModuleLanding tab={tab} onOpenLegacy={() => openLegacy(tab)} />}
+      {tab === 'settings' && user.scope === 'platform' && <SettingsPage canManage={canManage} onNavigate={setTab} />}
     </main>
   </div>;
 }
