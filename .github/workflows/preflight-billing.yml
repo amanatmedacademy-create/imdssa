@@ -38,13 +38,13 @@ jobs:
           test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_PASSWORD"
           SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
           export SSHPASS
-          sshpass -e scp "${SSH_ARGS[@]}" deploy/vps/migrations/018_refunds_and_reconciliation.sql deploy/vps/migrations/019_refund_aware_payment_engine.sql "$VPS_USER@$VPS_HOST:/tmp/"
+          sshpass -e scp "${SSH_ARGS[@]}" deploy/vps/migrations/018_refunds_and_reconciliation.sql deploy/vps/migrations/019_refund_aware_payment_engine.sql deploy/vps/migrations/020_reconciliation_resilience.sql "$VPS_USER@$VPS_HOST:/tmp/"
           sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
           set -euo pipefail
           DB="imdssa_billing_preflight_${RANDOM}_$$"
           cleanup() {
             sudo -u postgres dropdb --if-exists "$DB" >/dev/null 2>&1 || true
-            rm -f /tmp/018_refunds_and_reconciliation.sql /tmp/019_refund_aware_payment_engine.sql /tmp/imdssa-schema-preflight.sql
+            rm -f /tmp/018_refunds_and_reconciliation.sql /tmp/019_refund_aware_payment_engine.sql /tmp/020_reconciliation_resilience.sql /tmp/imdssa-schema-preflight.sql
           }
           trap cleanup EXIT
           sudo -u postgres createdb "$DB"
@@ -52,7 +52,8 @@ jobs:
           sudo -u postgres psql --set=ON_ERROR_STOP=1 --dbname="$DB" --file=/tmp/imdssa-schema-preflight.sql >/dev/null
           sudo -u postgres psql --set=ON_ERROR_STOP=1 --dbname="$DB" --file=/tmp/018_refunds_and_reconciliation.sql
           sudo -u postgres psql --set=ON_ERROR_STOP=1 --dbname="$DB" --file=/tmp/019_refund_aware_payment_engine.sql
-          sudo -u postgres psql --dbname="$DB" --tuples-only --no-align --command="select to_regclass('app.billing_refunds') is not null and to_regclass('app.billing_reconciliation_runs') is not null and to_regprocedure('app.record_verified_billing_refund(text,text,text,numeric,uuid,timestamp with time zone,jsonb)') is not null and to_regprocedure('app.record_verified_billing_payment(uuid,text,numeric,text,text,timestamp with time zone,jsonb)') is not null" | grep -q '^t$'
+          sudo -u postgres psql --set=ON_ERROR_STOP=1 --dbname="$DB" --file=/tmp/020_reconciliation_resilience.sql
+          sudo -u postgres psql --dbname="$DB" --tuples-only --no-align --command="select to_regclass('app.billing_refunds') is not null and to_regclass('app.billing_reconciliation_runs') is not null and to_regprocedure('app.record_verified_billing_refund(text,text,text,numeric,uuid,timestamp with time zone,jsonb)') is not null and to_regprocedure('app.record_verified_billing_payment(uuid,text,numeric,text,text,timestamp with time zone,jsonb)') is not null and to_regprocedure('app.reconcile_billing_state(text)') is not null" | grep -q '^t$'
           REMOTE
       - name: Publish preflight status
         if: always()
