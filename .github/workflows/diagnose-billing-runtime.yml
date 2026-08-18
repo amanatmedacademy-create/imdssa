@@ -1,0 +1,90 @@
+name: Diagnose Billing Runtime
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  statuses: write
+concurrency:
+  group: diagnose-billing-runtime
+  cancel-in-progress: true
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - name: Wait for deploy conclusion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 90); do
+            payload=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/status")
+            state=$(printf '%s' "$payload" | jq -r '[.statuses[] | select(.context=="imdssa/vps-deploy")][0].state // "pending"')
+            echo "deploy=$state attempt=$attempt"
+            if [ "$state" = success ] || [ "$state" = failure ] || [ "$state" = error ]; then exit 0; fi
+            sleep 8
+          done
+          exit 1
+      - run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Diagnose production phases
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
+          post_status() {
+            local context="$1" state="$2" description="$3"
+            curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+              -d "$(jq -nc --arg s "$state" --arg c "$context" --arg d "$description" '{state:$s,context:$c,description:$d}')" >/dev/null
+          }
+          if sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('"'"'app.billing_refunds'"'"') is not null and to_regclass('"'"'app.billing_reconciliation_runs'"'"') is not null and to_regprocedure('"'"'app.reconcile_billing_state(text)'"'"') is not null and to_regprocedure('"'"'app.record_verified_billing_payment(uuid,text,numeric,text,text,timestamp with time zone,jsonb)'"'"') is not null" | grep -q '^"'"'t$'"'"''; then
+            post_status imdssa/diag-db success 'Refund/reconciliation DB objects are applied'
+          else post_status imdssa/diag-db failure 'Refund/reconciliation DB objects missing'; fi
+
+          if sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          systemctl is-active --quiet imds-super-admin-api.service
+          systemctl is-active --quiet imdssa-billing-reconciliation.timer
+          source /etc/imds-super-admin/postgres.env
+          sudo -u imdssa env DATABASE_URL="$DATABASE_URL" /usr/bin/psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 --quiet --command="select app.reconcile_billing_state(null);" >/dev/null
+          REMOTE
+          then post_status imdssa/diag-reconciliation success 'Reconciliation service/function executes successfully'
+          else post_status imdssa/diag-reconciliation failure 'Reconciliation service/function execution failed'; fi
+
+          if sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          API=http://127.0.0.1:8788
+          TOKEN="$(openssl rand -hex 32)"
+          TOKEN_HASH="$(printf '%s' "$TOKEN" | sha256sum | awk '{print $1}')"
+          ADMIN_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select id from app.platform_users where is_active=true and global_role in ('platform_owner','platform_admin') order by created_at limit 1")"
+          test -n "$ADMIN_ID"
+          sudo -u postgres psql --dbname=imdssa --command="insert into app.auth_sessions(user_id,token_hash,expires_at) values ('$ADMIN_ID'::uuid,'$TOKEN_HASH',now()+interval '5 minutes')" >/dev/null
+          trap 'sudo -u postgres psql --dbname=imdssa --command="delete from app.auth_sessions where token_hash='"'"'$TOKEN_HASH'"'"'" >/dev/null 2>&1 || true' EXIT
+          curl -fsS --max-time 10 -H "Cookie: imdssa_session=$TOKEN" "$API/api/v1/billing/overview" >/dev/null
+          curl -fsS --max-time 10 -H "Cookie: imdssa_session=$TOKEN" "$API/api/v1/billing/refunds" >/dev/null
+          curl -fsS --max-time 10 -H "Cookie: imdssa_session=$TOKEN" "$API/api/v1/billing/reconciliation" >/dev/null
+          REMOTE
+          then post_status imdssa/diag-api success 'Authenticated billing API routes are healthy'
+          else post_status imdssa/diag-api failure 'Authenticated billing API route failed'; fi
+
+          if sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          source /etc/imds-platform-control.env
+          test -n "$IMDS_PLATFORM_CONTROL_TOKEN"
+          curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" http://127.0.0.1:8787/internal/platform/info >/dev/null
+          ORGANIZATION_ID="$(sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select organization_id from app.product_subscriptions order by created_at limit 1")"
+          if [ -n "$ORGANIZATION_ID" ]; then curl -fsS --max-time 10 -H "Authorization: Bearer $IMDS_PLATFORM_CONTROL_TOKEN" "http://127.0.0.1:8788/v1/billing/center?organizationId=$ORGANIZATION_ID" >/dev/null; fi
+          REMOTE
+          then post_status imdssa/diag-control-channel success 'Marketing control/billing channel is healthy'
+          else post_status imdssa/diag-control-channel failure 'Marketing control/billing channel failed'; fi
