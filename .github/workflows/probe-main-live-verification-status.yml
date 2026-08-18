@@ -1,0 +1,24 @@
+name: Probe Main Live Verification Status
+
+on:
+  issues:
+    types: [edited]
+
+permissions:
+  actions: read
+  issues: write
+  contents: read
+
+jobs:
+  probe:
+    if: github.event.issue.number == 47
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report latest verifier run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          row="$(gh run list --repo "$REPO" --workflow scheduled-main-live-verification.yml --limit 1 --json databaseId,status,conclusion,headSha,event --jq '.[0]')"
+          gh issue comment 47 --repo "$REPO" --body "status_probe=$row"
