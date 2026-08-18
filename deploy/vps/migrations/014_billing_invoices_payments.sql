@@ -96,6 +96,23 @@ CREATE INDEX IF NOT EXISTS idx_billing_invoices_status_due ON app.billing_invoic
 CREATE INDEX IF NOT EXISTS idx_billing_payments_org ON app.billing_payments(organization_id,received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_billing_events_org ON app.billing_events(organization_id,id DESC);
 
+CREATE OR REPLACE FUNCTION app.trg_invoice_issued_pending_payment()
+RETURNS trigger LANGUAGE plpgsql SET search_path=app,pg_temp AS $$
+BEGIN
+  IF NEW.status='issued' AND (TG_OP='INSERT' OR OLD.status IS DISTINCT FROM NEW.status) THEN
+    UPDATE app.product_subscriptions
+    SET status='pending_payment', updated_at=now()
+    WHERE id=NEW.subscription_id AND status='trial';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS billing_invoice_issued_pending_payment ON app.billing_invoices;
+CREATE TRIGGER billing_invoice_issued_pending_payment
+AFTER INSERT OR UPDATE OF status ON app.billing_invoices
+FOR EACH ROW EXECUTE FUNCTION app.trg_invoice_issued_pending_payment();
+
 CREATE OR REPLACE FUNCTION app.next_billing_document_number(p_prefix text, p_table text)
 RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path=app,pg_temp AS $$
 DECLARE result text; seq bigint;
