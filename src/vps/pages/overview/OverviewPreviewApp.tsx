@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { OverviewPage } from './OverviewPage';
+import './overviewPreview.css';
 
 type User = { id: string; email: string; fullName: string; role: string; scope: 'platform' | 'tenant' };
 type OverviewSnapshot = { organizations: number; products: number; modules: number; installations: number; platform_users: number; sync_pending: number };
