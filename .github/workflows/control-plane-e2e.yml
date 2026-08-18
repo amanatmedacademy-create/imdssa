@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - '.github/workflows/control-plane-e2e.yml'
+      - 'scripts/verify-sessions-control-e2e.sh'
 
 jobs:
   verify:
