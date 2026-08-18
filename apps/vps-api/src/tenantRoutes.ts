@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Pool } from 'pg';
 import type { PlatformUser, TenantAccessScope } from './tenantAccess.js';
+import { handleUserAccessApi } from './userAccessRoutes.js';
 
 type JsonResponder = (res: ServerResponse, status: number, body: unknown) => void;
 
@@ -20,7 +21,20 @@ const MODULE_VISIBLE = `(om.role in ('owner','admin') or m.code = any(om.allowed
 
 export async function handleTenantApi(context: TenantRouteContext): Promise<boolean> {
   const { res, pool, url, method, user, scope, json } = context;
+
+  if (await handleUserAccessApi(context)) return true;
   if (scope.isPlatformUser || !url.pathname.startsWith('/api/tenant/v1/')) return false;
+
+  const policy = await pool.query<{ must_change_password: boolean }>('select must_change_password from app.platform_users where id=$1 and is_active=true', [user.id]);
+  const mustChangePassword = policy.rows[0]?.must_change_password === true;
+  if (url.pathname === '/api/tenant/v1/session-policy' && method === 'GET') {
+    json(res, 200, { mustChangePassword });
+    return true;
+  }
+  if (mustChangePassword) {
+    json(res, 403, { error: 'PASSWORD_CHANGE_REQUIRED' });
+    return true;
+  }
 
   if (url.pathname === '/api/tenant/v1/context' && method === 'GET') {
     const memberships = await pool.query(`select om.organization_id,om.role,om.allowed_product_codes,om.allowed_module_codes,o.name organization_name
