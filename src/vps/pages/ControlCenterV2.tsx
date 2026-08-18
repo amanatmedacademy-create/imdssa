@@ -9,7 +9,6 @@ import {
   Layers3,
   LockKeyhole,
   PackageCheck,
-  ReceiptText,
   ServerCog,
   Settings2,
   ShieldCheck,
@@ -17,7 +16,8 @@ import {
   Workflow,
 } from 'lucide-react';
 import { OverviewPage } from './overview/OverviewPage';
-import type { ControlCenterTab, ControlCommand, Installation, Organization, Overview, Product, RealtimeState, User } from '../controlCenter';
+import { OrganizationsPage } from './organizations/OrganizationsPage';
+import type { ControlCenterTab, ControlCommand, Installation, Organization, OrganizationProduct, Overview, Product, RealtimeState, User } from '../controlCenter';
 import { api } from '../controlCenter';
 import './controlCenterV2.css';
 
@@ -41,8 +41,7 @@ const administrationNavigation: NavigationItem[] = [
   { id: 'settings', label: 'Настройки', description: 'Уведомления и defaults', icon: Settings2 },
 ];
 
-const moduleSpecs: Record<Exclude<ControlCenterTab, 'overview'>, { kicker: string; title: string; text: string; fields: string[] }> = {
-  organizations: { kicker: 'CLIENT CONTOUR', title: 'Организации', text: 'Единая карточка клиники или компании и все связанные коммерческие доступы.', fields: ['Реквизиты и статус', 'Подключённые продукты', 'Активные модули', 'Подписки и доступ', 'Пользователи организации', 'Финансовый статус'] },
+const moduleSpecs: Record<Exclude<ControlCenterTab, 'overview' | 'organizations'>, { kicker: string; title: string; text: string; fields: string[] }> = {
   registrations: { kicker: 'ONBOARDING', title: 'Регистрации', text: 'Входящие регистрации из продуктов до создания или связывания организации.', fields: ['Источник регистрации', 'Компания и владелец', 'Контакты', 'Trial', 'Дата регистрации', 'Статус обработки'] },
   products: { kicker: 'PRODUCT REGISTRY', title: 'Продукты', text: 'Технический и коммерческий реестр всех продуктов IMDS.', fields: ['Health и heartbeat', 'Версия', 'Организации продукта', 'Тарифы продукта', 'Каталог модулей', 'Интеграция Control Center'] },
   modules: { kicker: 'ENTITLEMENTS', title: 'Модули', text: 'Каталог возможностей продуктов и фактический доступ организаций.', fields: ['Категория и версия', 'Владелец-продукт', 'Commercial role', 'Цена add-on', 'Установки', 'Desired / actual state'] },
@@ -55,7 +54,7 @@ const moduleSpecs: Record<Exclude<ControlCenterTab, 'overview'>, { kicker: strin
   settings: { kicker: 'CONTROL CENTER', title: 'Настройки', text: 'Бизнес-настройки Control Center без серверных secrets.', fields: ['Telegram уведомления', 'Notification routing', 'Commercial defaults', 'Trial defaults', 'Системные параметры', 'Audit изменений'] },
 };
 
-function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, 'overview'>; onOpenLegacy: () => void }) {
+function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, 'overview' | 'organizations'>; onOpenLegacy: () => void }) {
   const spec = moduleSpecs[tab];
   return <section className="ccv2-module">
     <div className="ccv2-module-intro"><div><span>{spec.kicker}</span><h2>{spec.title}</h2><p>{spec.text}</p></div><button type="button" onClick={onOpenLegacy}>Открыть текущий рабочий экран</button></div>
@@ -65,7 +64,6 @@ function ModuleLanding({ tab, onOpenLegacy }: { tab: Exclude<ControlCenterTab, '
 }
 
 const legacyTabIndex: Partial<Record<ControlCenterTab, number>> = {
-  organizations: 1,
   registrations: 2,
   products: 3,
   modules: 4,
@@ -84,6 +82,7 @@ export function ControlCenterV2() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [installations, setInstallations] = useState<Installation[]>([]);
+  const [organizationProducts, setOrganizationProducts] = useState<OrganizationProduct[]>([]);
   const [commands, setCommands] = useState<ControlCommand[]>([]);
   const [realtimeState, setRealtimeState] = useState<RealtimeState>('connecting');
   const [loading, setLoading] = useState(true);
@@ -93,14 +92,21 @@ export function ControlCenterV2() {
     const me = await api<{ user: User }>('/api/auth/me');
     setUser(me.user);
     const root = me.user.scope === 'tenant' ? '/api/tenant/v1' : '/api/v1';
-    const [snapshot, orgs, productList, installationList, commandList] = await Promise.all([
+    const [snapshot, orgs, productList, installationList, organizationProductList, commandList] = await Promise.all([
       api<Overview>(`${root}/overview`),
       api<{ items: Organization[] }>(`${root}/organizations`),
       api<{ items: Product[] }>(`${root}/products`),
       api<{ items: Installation[] }>(`${root}/installations`),
+      api<{ items: OrganizationProduct[] }>(`${root}/organization-products`),
       api<{ items: ControlCommand[] }>(`${root}/control-commands`),
     ]);
-    setOverview(snapshot); setOrganizations(orgs.items); setProducts(productList.items); setInstallations(installationList.items); setCommands(commandList.items); setError('');
+    setOverview(snapshot);
+    setOrganizations(orgs.items);
+    setProducts(productList.items);
+    setInstallations(installationList.items);
+    setOrganizationProducts(organizationProductList.items);
+    setCommands(commandList.items);
+    setError('');
   }, []);
 
   useEffect(() => { void refresh().catch((e) => setError(e instanceof Error ? e.message : 'Ошибка загрузки')).finally(() => setLoading(false)); }, [refresh]);
@@ -115,6 +121,7 @@ export function ControlCenterV2() {
 
   const visibleBusiness = useMemo(() => user?.scope === 'tenant' ? businessNavigation.filter((item) => !['registrations', 'subscriptions', 'billing'].includes(item.id)) : businessNavigation, [user?.scope]);
   const visibleAdministration = useMemo(() => user?.scope === 'tenant' ? administrationNavigation.filter((item) => item.id !== 'settings') : administrationNavigation, [user?.scope]);
+  const canManage = Boolean(user?.scope === 'platform' && ['platform_owner', 'platform_admin'].includes(user.role));
 
   const openLegacy = (target: ControlCenterTab) => {
     if (target === 'users') { window.location.href = '/'; return; }
@@ -138,7 +145,9 @@ export function ControlCenterV2() {
     <main className="ccv2-main">
       <header className="ccv2-header"><div><span>IMDS CONTROL CENTER</span><h1>{selected.label}</h1><p>{selected.description}</p></div><div className={`ccv2-live ${realtimeState}`}><i />{realtimeState === 'online' ? 'Realtime' : realtimeState === 'connecting' ? 'Connecting' : 'Offline'}</div></header>
       {error && <div className="vps-error">API: {error}</div>}
-      {tab === 'overview' ? <OverviewPage overview={overview} organizations={organizations} products={products} installations={installations} commands={commands} realtimeState={realtimeState} onRefresh={() => void refresh()} onNavigate={(target) => setTab(target)} /> : <ModuleLanding tab={tab} onOpenLegacy={() => openLegacy(tab)} />}
+      {tab === 'overview' && <OverviewPage overview={overview} organizations={organizations} products={products} installations={installations} commands={commands} realtimeState={realtimeState} onRefresh={() => void refresh()} onNavigate={(target) => setTab(target)} />}
+      {tab === 'organizations' && <OrganizationsPage user={user} organizations={organizations} organizationProducts={organizationProducts} installations={installations} canManage={canManage} onChanged={refresh} onNavigate={setTab} />}
+      {tab !== 'overview' && tab !== 'organizations' && <ModuleLanding tab={tab} onOpenLegacy={() => openLegacy(tab)} />}
     </main>
   </div>;
 }
