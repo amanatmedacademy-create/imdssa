@@ -1,0 +1,15 @@
+[Unit]
+Description=IMDS subscription lifecycle refresh
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=imdssa
+Group=imdssa
+EnvironmentFile=/etc/imds-super-admin/postgres.env
+ExecStart=/bin/sh -c '/usr/bin/psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 --quiet --command="select app.refresh_subscription_lifecycle();"'
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
