@@ -1,0 +1,239 @@
+diff --git a/server/billingGateway.ts b/server/billingGateway.ts
+--- a/server/billingGateway.ts
++++ b/server/billingGateway.ts
+@@ -55,7 +55,7 @@ async function resolveBillingContext(request: Request, env: BillingEnv): Promise
+   const contextEnv = requestedCompany ? { ...env, CURRENT_COMPANY_ID: requestedCompany } : env;
+   const tenantId = await resolveCompanyId(contextEnv as never, user.id, user.platformRole === 'super_admin' ? 'super_admin' : undefined);
+   if (!tenantId) return json({ error: 'TENANT_REQUIRED' }, 400);
+-  const entitlement = await platformEntitlementForTenant(tenantId);
++  const entitlement = await platformEntitlementForTenant(tenantId, env);
+   const organizationId = entitlement?.organizationId || null;
+   const role = user.platformRole === 'super_admin'
+     ? 'super_admin'
+diff --git a/server/branchQuotaGateway.ts b/server/branchQuotaGateway.ts
+--- a/server/branchQuotaGateway.ts
++++ b/server/branchQuotaGateway.ts
+@@ -30,7 +30,7 @@ export async function enforceBranchQuota(request: Request, env: Env): Promise<Re
+     const role = await resolveTenantMembershipRole({ ...env, CURRENT_COMPANY_ID: companyId } as never, user.id);
+     if (role !== 'owner' && role !== 'administrator') return null;
+   }
+-  const entitlement = await platformEntitlementForTenant(companyId);
++  const entitlement = await platformEntitlementForTenant(companyId, env);
+   const limit = entitlement?.limits?.branches;
+   if (typeof limit !== 'number') return null;
+   const used = await branchCount(env, companyId);
+diff --git a/server/platformControl.ts b/server/platformControl.ts
+--- a/server/platformControl.ts
++++ b/server/platformControl.ts
+@@ -46,6 +46,7 @@ export type PlatformEntitlement = {
+ };
+ type StateFile = { version: 1; tenants: Record<string, PlatformEntitlement> };
+ type Company = { id?: unknown; name?: unknown; slug?: unknown };
++type TenantScope = { organizationId: string | null; tenantIds: string[] };
+ type StandardPlatformCommand = {
+   commandId?: string;
+   command?: string;
+@@ -285,21 +286,53 @@ async function dataPatch(env: PlatformEnv, pathName: string, body: unknown): Pro
+   if (!response.ok) throw new Error(`LOCAL_PATCH_${response.status}:${(await response.text()).slice(0, 300)}`);
+ }
+ 
++async function tenantScopeForTenant(tenantId: string, env: PlatformEnv): Promise<TenantScope | null> {
++  const rows = await dataRows<Array<{ id?: unknown; organization_id?: unknown }>>(
++    env,
++    `crm_companies?id=eq.${encodeURIComponent(tenantId)}&select=id,organization_id&limit=1`,
++  );
++  const id = text(rows[0]?.id);
++  if (!id) return null;
++  const organizationId = text(rows[0]?.organization_id);
++  if (!organizationId) return { organizationId: null, tenantIds: [id] };
++  const siblings = await dataRows<Array<{ id?: unknown }>>(
++    env,
++    `crm_companies?organization_id=eq.${encodeURIComponent(organizationId)}&select=id&order=id.asc&limit=1000`,
++  );
++  const tenantIds = [...new Set(siblings.map((row) => text(row.id)).filter((value): value is string => Boolean(value)))];
++  return { organizationId, tenantIds: tenantIds.length ? tenantIds : [id] };
++}
++
+ async function platformManagementStatus(tenantId: string, env: PlatformEnv): Promise<PlatformManagementStatus> {
+   try {
+-    const rows = await dataRows<Array<{ platform_managed_at?: unknown }>>(
++    const rows = await dataRows<Array<{ id?: unknown; organization_id?: unknown; platform_managed_at?: unknown }>>(
+       env,
+-      `crm_companies?id=eq.${encodeURIComponent(tenantId)}&select=platform_managed_at&limit=1`,
++      `crm_companies?id=eq.${encodeURIComponent(tenantId)}&select=id,organization_id,platform_managed_at&limit=1`,
+     );
+     if (!rows.length) return 'unknown';
+-    return text(rows[0]?.platform_managed_at) ? 'managed' : 'unmanaged';
++    if (text(rows[0]?.platform_managed_at)) return 'managed';
++    const organizationId = text(rows[0]?.organization_id);
++    if (!organizationId) return 'unmanaged';
++    const managedSibling = await dataRows<Array<{ id?: unknown }>>(
++      env,
++      `crm_companies?organization_id=eq.${encodeURIComponent(organizationId)}&platform_managed_at=not.is.null&select=id&limit=1`,
++    );
++    return managedSibling.length ? 'managed' : 'unmanaged';
+   } catch {
+     return 'unknown';
+   }
+ }
+ 
+-async function markPlatformManagedTenant(tenantId: string, env: PlatformEnv): Promise<void> {
+-  await dataPatch(env, `crm_companies?id=eq.${encodeURIComponent(tenantId)}`, { platform_managed_at: new Date().toISOString() });
++async function markPlatformManagedTenant(tenantId: string, env: PlatformEnv): Promise<string[]> {
++  const scope = await tenantScopeForTenant(tenantId, env);
++  if (!scope) throw new Error('TENANT_NOT_FOUND');
++  const managedAt = new Date().toISOString();
++  if (scope.organizationId) {
++    await dataPatch(env, `crm_companies?organization_id=eq.${encodeURIComponent(scope.organizationId)}`, { platform_managed_at: managedAt });
++  } else {
++    await dataPatch(env, `crm_companies?id=eq.${encodeURIComponent(tenantId)}`, { platform_managed_at: managedAt });
++  }
++  return scope.tenantIds;
+ }
+ 
+ async function listCompanies(env: PlatformEnv): Promise<Array<{ id: string; name: string; slug: string }>> {
+@@ -317,12 +350,12 @@ async function organizationIdForTenant(tenantId: string, env: PlatformEnv): Prom
+   return text(rows[0]?.organization_id);
+ }
+ 
+-export async function platformUsageForTenant(tenantId: string, env: PlatformEnv, organizationId?: string | null, fresh = false): Promise<PlatformUsageState> {
++export async function platformUsageForTenant(tenantId: string, env: PlatformEnv, _platformOrganizationId?: string | null, fresh = false): Promise<PlatformUsageState> {
+   const normalized = tenantId.trim();
+   if (!normalized) return { clinics: 0, users: 0, leads: 0, openTasks: 0, integrations: 0 };
+   const cached = usageCache.get(normalized);
+   if (!fresh && cached && cached.expiresAt > Date.now()) return cached.usage;
+-  const orgId = organizationId || await organizationIdForTenant(normalized, env);
++  const orgId = await organizationIdForTenant(normalized, env);
+   const [clinics, users, leads, openTasks, integrations] = await Promise.all([
+     orgId ? dataCount(env, `crm_companies?organization_id=eq.${encodeURIComponent(orgId)}&select=id&limit=1`).catch(() => 1) : Promise.resolve(1),
+     dataCount(env, `crm_company_members?company_id=eq.${encodeURIComponent(normalized)}&status=eq.active&select=id&limit=1`).catch(() => 0),
+@@ -455,11 +488,19 @@ export async function localTrialForTenant(tenantId: string, env: PlatformEnv): P
+   };
+ }
+ 
+-export async function platformEntitlementForTenant(tenantId: string): Promise<PlatformEntitlement | null> {
++export async function platformEntitlementForTenant(tenantId: string, env: PlatformEnv = process.env): Promise<PlatformEntitlement | null> {
+   const normalized = tenantId.trim();
+   if (!normalized) return null;
+   const state = await readState();
+-  return state.tenants[normalized] || null;
++  const exact = state.tenants[normalized];
++  if (exact) return exact;
++  const scope = await tenantScopeForTenant(normalized, env).catch(() => null);
++  if (!scope) return null;
++  for (const siblingId of scope.tenantIds) {
++    const sibling = state.tenants[siblingId];
++    if (sibling) return { ...sibling, tenantId: normalized };
++  }
++  return null;
+ }
+ 
+ async function applyStandardCommand(command: StandardPlatformCommand, env: PlatformEnv): Promise<Response> {
+@@ -470,8 +511,10 @@ async function applyStandardCommand(command: StandardPlatformCommand, env: Platf
+   const commandId = text(command.commandId) || crypto.randomUUID();
+   if (!organizationId || !tenantId || !commandName) return json({ commandId, status: 'failed', retryable: false, errorCode: 'INVALID_COMMAND', errorMessage: 'Organization, tenant and command are required' }, 400);
+ 
++  const scope = await tenantScopeForTenant(tenantId, env).catch(() => null);
++  if (!scope) return json({ commandId, status: 'failed', retryable: false, errorCode: 'TENANT_NOT_FOUND', errorMessage: 'Marketing tenant was not found' }, 404);
+   const state = await readState();
+-  const current = state.tenants[tenantId];
++  const current = state.tenants[tenantId] || scope.tenantIds.map((id) => state.tenants[id]).find(Boolean);
+   const rawEntitlements = payload.entitlements;
+   const entitlements = rawEntitlements && !Array.isArray(rawEntitlements) && typeof rawEntitlements === 'object'
+     ? rawEntitlements as Record<string, unknown>
+@@ -488,20 +531,22 @@ async function applyStandardCommand(command: StandardPlatformCommand, env: Platf
+     return json({ commandId, status: 'failed', retryable: false, errorCode: 'UNSUPPORTED_COMMAND', errorMessage: `Unsupported command: ${commandName}` }, 400);
+   }
+ 
+-  const tenant: PlatformEntitlement = {
++  const revision = (current?.revision || 0) + 1;
++  const updatedAt = new Date().toISOString();
++  const baseTenant: PlatformEntitlement = {
+     organizationId,
+     tenantId,
+-    revision: (current?.revision || 0) + 1,
++    revision,
+     productEnabled,
+     modules,
+     limits: limitsFromEntitlements(entitlements, current?.limits || {}),
+     billing: billingFromEntitlements(entitlements, current?.billing),
+-    updatedAt: new Date().toISOString(),
++    updatedAt,
+   };
+-  await markPlatformManagedTenant(tenantId, env);
+-  state.tenants[tenantId] = tenant;
++  const managedTenantIds = await markPlatformManagedTenant(tenantId, env);
++  for (const scopedTenantId of managedTenantIds) state.tenants[scopedTenantId] = { ...baseTenant, tenantId: scopedTenantId };
+   await writeState(state);
+-  return json({ commandId, status: 'completed', externalTenantId: tenantId, completedAt: new Date().toISOString(), data: { revision: tenant.revision } });
++  return json({ commandId, status: 'completed', externalTenantId: tenantId, completedAt: updatedAt, data: { revision, tenantIds: managedTenantIds } });
+ }
+ 
+ export async function handlePlatformInternalRequest(request: Request, env: PlatformEnv): Promise<Response | null> {
+@@ -518,7 +563,7 @@ export async function handlePlatformInternalRequest(request: Request, env: Platf
+   }
+ 
+   if (url.pathname === '/internal/platform/info' && request.method === 'GET') {
+-    return json({ product: 'imds-marketing', runtime: 'vps', protocol: 3, entitlementMode: 'fail-closed-managed', pid: process.pid, uptimeSeconds: Math.floor(process.uptime()) });
++    return json({ product: 'imds-marketing', runtime: 'vps', protocol: 4, entitlementMode: 'fail-closed-managed-organization-scope', pid: process.pid, uptimeSeconds: Math.floor(process.uptime()) });
+   }
+ 
+   if (url.pathname === '/internal/platform/tenants' && request.method === 'GET') {
+@@ -529,7 +574,9 @@ export async function handlePlatformInternalRequest(request: Request, env: Platf
+   if (url.pathname === '/internal/platform/state' && request.method === 'GET') {
+     const state = await readState();
+     const tenantId = (url.searchParams.get('tenantId') || '').trim();
+-    return json(tenantId ? { tenant: state.tenants[tenantId] || null } : state);
++    if (!tenantId) return json(state);
++    const tenant = await platformEntitlementForTenant(tenantId, env);
++    return json({ tenant });
+   }
+ 
+   if (url.pathname === '/internal/platform/entitlements/apply' && request.method === 'POST') {
+@@ -541,23 +588,30 @@ export async function handlePlatformInternalRequest(request: Request, env: Platf
+     const modules = body?.modules && typeof body.modules === 'object' ? body.modules as Record<string, boolean> : null;
+     if (!organizationId || !tenantId || !Number.isInteger(revision) || revision < 1 || !modules) return json({ error: 'INVALID_ENTITLEMENT_PAYLOAD' }, 400);
+ 
++    const scope = await tenantScopeForTenant(tenantId, env).catch(() => null);
++    if (!scope) return json({ error: 'TENANT_NOT_FOUND' }, 404);
+     const state = await readState();
+-    const current = state.tenants[tenantId];
+-    if (current && current.revision > revision) return json({ applied: false, stale: true, tenant: current }, 409);
+-    const tenant: PlatformEntitlement = {
++    const scopedCurrent = scope.tenantIds
++      .map((id) => state.tenants[id])
++      .filter((item): item is PlatformEntitlement => Boolean(item));
++    const stale = scopedCurrent.find((item) => item.organizationId === organizationId && item.revision > revision);
++    if (stale) return json({ applied: false, stale: true, tenant: stale }, 409);
++    const current = state.tenants[tenantId] || scopedCurrent[0];
++    const updatedAt = new Date().toISOString();
++    const baseTenant: PlatformEntitlement = {
+       organizationId,
+       tenantId,
+       revision,
+       productEnabled,
+       modules,
+       limits: normalizeLimits(body?.limits) ?? current?.limits ?? {},
+       billing: normalizeBilling(body?.billing) ?? current?.billing,
+-      updatedAt: new Date().toISOString(),
++      updatedAt,
+     };
+-    await markPlatformManagedTenant(tenantId, env);
+-    state.tenants[tenantId] = tenant;
++    const managedTenantIds = await markPlatformManagedTenant(tenantId, env);
++    for (const scopedTenantId of managedTenantIds) state.tenants[scopedTenantId] = { ...baseTenant, tenantId: scopedTenantId };
+     await writeState(state);
+-    return json({ applied: true, tenant });
++    return json({ applied: true, tenant: state.tenants[tenantId], tenantIds: managedTenantIds });
+   }
+ 
+   return json({ error: 'NOT_FOUND' }, 404);
+@@ -578,7 +632,7 @@ export async function enforcePlatformEntitlement(request: Request, env: Platform
+ 
+   const tenantId = tenantIdFromRequest(request);
+   if (!tenantId) return null;
+-  const tenant = await platformEntitlementForTenant(tenantId);
++  const tenant = await platformEntitlementForTenant(tenantId, env);
+   if (tenant) {
+     if (!tenant.productEnabled) return json({ error: 'PRODUCT_DISABLED_BY_PLATFORM', billing: tenant.billing || null }, 403);
+     const billingAccessDenied = billingDenied(tenant.billing, method);
