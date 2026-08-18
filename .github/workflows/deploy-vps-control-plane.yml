@@ -47,8 +47,8 @@ jobs:
           cp deploy/vps/migrations/005_security_hardening.sql .deploy-stage/005_security_hardening.sql
           cp deploy/vps/migrations/006_tenant_rbac.sql .deploy-stage/006_tenant_rbac.sql
           cp deploy/vps/migrations/007_notification_delivery_settings.sql .deploy-stage/007_notification_delivery_settings.sql
-          cp deploy/vps/migrations/008_product_commercial_catalog.sql .deploy-stage/008_product_commercial_catalog.sql
           cp deploy/vps/migrations/009_tenant_user_access.sql .deploy-stage/009_tenant_user_access.sql
+          cp deploy/vps/migrations/010_product_commercial_catalog.sql .deploy-stage/010_product_commercial_catalog.sql
           cp deploy/vps/nginx-super-admin.conf .deploy-stage/nginx.conf
           cp deploy/vps/deploy-control-plane.sh .deploy-stage/deploy-control-plane.sh
           cp deploy/vps/product-monitor.sh .deploy-stage/product-monitor.sh
