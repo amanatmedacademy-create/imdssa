@@ -71,6 +71,7 @@ function tabFromLocation(): ControlCenterTab {
 export function ControlCenterV2() {
   const [user, setUser] = useState<User | null>(null);
   const [tab, setTab] = useState<ControlCenterTab>(() => tabFromLocation());
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState('');
   const [overview, setOverview] = useState<Overview | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -195,8 +196,8 @@ export function ControlCenterV2() {
       <header className="ccv2-header"><div><span>IMDS CONTROL CENTER</span><h1>{selected.label}</h1><p>{selected.description}</p></div><div className={`ccv2-live ${realtimeState}`} title="Соединение с обновлениями в реальном времени"><i />{realtimeLabel}</div></header>
       {error && <div className="vps-error">{error}</div>}
       {tab === 'overview' && <OverviewPage overview={overview} organizations={organizations} products={products} installations={installations} commands={commands} realtimeState={realtimeState} onRefresh={() => void refresh()} onNavigate={navigate} />}
-      {tab === 'organizations' && <OrganizationsPage user={user} organizations={organizations} organizationProducts={organizationProducts} installations={installations} canManage={canManage} onChanged={refresh} onNavigate={navigate} />}
-      {tab === 'registrations' && user.scope === 'platform' && <RegistrationsPage organizations={organizations} realtimeTick={realtimeEvents.length} onOpenOrganization={() => navigate('organizations')} />}
+      {tab === 'organizations' && <OrganizationsPage user={user} organizations={organizations} organizationProducts={organizationProducts} installations={installations} canManage={canManage} selectedOrganizationId={selectedOrganizationId} onChanged={refresh} onNavigate={navigate} />}
+      {tab === 'registrations' && user.scope === 'platform' && <RegistrationsPage organizations={organizations} realtimeTick={realtimeEvents.length} onOpenOrganization={(organizationId) => { setSelectedOrganizationId(organizationId); navigate('organizations'); }} />}
       {tab === 'products' && <ProductsPage user={user} products={products} organizationProducts={organizationProducts} installations={installations} canManage={canManage} />}
       {tab === 'modules' && <ModulesPage user={user} modules={modules} products={products} organizations={organizations} installations={installations} canManage={canManage} onChanged={refresh} onNavigateSync={() => navigate('sync')} />}
       {tab === 'subscriptions' && user.scope === 'platform' && <SubscriptionsPage organizations={organizations} products={products} canManage={canManage} />}
