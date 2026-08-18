@@ -23,6 +23,8 @@ export type TenantAccessScope = {
 
 export async function loadTenantAccess(pool: Pool, user: PlatformUser): Promise<TenantAccessScope> {
   if (user.global_role) return { isPlatformUser: true, memberships: [] };
+  const security = await pool.query<{ must_change_password: boolean }>('select must_change_password from app.platform_users where id=$1 and is_active=true', [user.id]);
+  if (security.rows[0]?.must_change_password) return { isPlatformUser: false, memberships: [] };
   const result = await pool.query<OrganizationMembership>(`
     select organization_id,role,status,allowed_product_codes,allowed_module_codes
     from app.organization_memberships
