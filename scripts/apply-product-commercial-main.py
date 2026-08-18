@@ -31,22 +31,22 @@ replacement = "  {tab === 'products' && <ProductCommercialCenter products={produ
 s = s[:start] + replacement + s[end:]
 p.write_text(s)
 
-# Runtime migration list follows current tenant-user migration 008.
+# Runtime migration list follows tenant user access migration 009.
 p = Path('deploy/vps/deploy-control-plane.sh')
 s = p.read_text()
-if '009_product_commercial_catalog.sql' not in s:
-    marker = '008_tenant_user_access.sql; do'
-    s = replace_once(s, marker, '008_tenant_user_access.sql 009_product_commercial_catalog.sql; do', 'deploy migration list')
+if '010_product_commercial_catalog.sql' not in s:
+    marker = '009_tenant_user_access.sql; do'
+    s = replace_once(s, marker, '009_tenant_user_access.sql 010_product_commercial_catalog.sql; do', 'deploy migration list')
 p.write_text(s)
 
 # Deployment staging and authenticated verification.
 p = Path('.github/workflows/deploy-vps-control-plane.yml')
 s = p.read_text()
-if '009_product_commercial_catalog.sql .deploy-stage/009_product_commercial_catalog.sql' not in s:
-    anchor = '          cp deploy/vps/migrations/008_tenant_user_access.sql .deploy-stage/008_tenant_user_access.sql\n'
+if '010_product_commercial_catalog.sql .deploy-stage/010_product_commercial_catalog.sql' not in s:
+    anchor = '          cp deploy/vps/migrations/009_tenant_user_access.sql .deploy-stage/009_tenant_user_access.sql\n'
     if anchor not in s:
         anchor = '          cp deploy/vps/migrations/007_notification_delivery_settings.sql .deploy-stage/007_notification_delivery_settings.sql\n'
-    s = replace_once(s, anchor, anchor + '          cp deploy/vps/migrations/009_product_commercial_catalog.sql .deploy-stage/009_product_commercial_catalog.sql\n', 'stage commercial migration')
+    s = replace_once(s, anchor, anchor + '          cp deploy/vps/migrations/010_product_commercial_catalog.sql .deploy-stage/010_product_commercial_catalog.sql\n', 'stage commercial migration')
 if "to_regclass('app.product_plans')" not in s:
     check = "          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command=\"select to_regclass('app.product_plans') is not null and to_regclass('app.product_module_commercial') is not null\" | grep -q '^t$'\n"
     anchor = "          sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command=\"select to_regclass('app.organization_memberships') is not null\" | grep -q '^t$'\n"
