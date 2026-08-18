@@ -48,6 +48,18 @@ async function resolveInvoice(pool: Pool, input: { invoiceId?: string; invoiceNu
   return result.rows[0] ?? null;
 }
 
+async function resolveInvoiceFromPaymentReference(pool: Pool, externalReference: string) {
+  if (!externalReference) return null;
+  const result = await pool.query(`select i.*,o.external_key
+    from app.billing_payments p
+    join app.billing_payment_allocations a on a.payment_id=p.id
+    join app.billing_invoices i on i.id=a.invoice_id
+    join app.organizations o on o.id=i.organization_id
+    where p.external_reference=$1
+    order by a.created_at limit 1`, [externalReference]);
+  return result.rows[0] ?? null;
+}
+
 async function recordPayment(pool: Pool, input: {
   invoiceId: string; method: string; amountKzt: number; externalReference: string;
   payerName?: string | null; receivedAt?: string | null; metadata?: JsonRecord;
@@ -80,12 +92,13 @@ async function handleVerifiedFeed(req: IncomingMessage,res: ServerResponse,pool:
   const status = text(payload.status || 'succeeded').toLowerCase();
   const eventType = text(payload.eventType || 'payment').toLowerCase();
   const amountKzt = number(payload.amountKzt);
-  const invoice = await resolveInvoice(pool,{invoiceId:text(payload.invoiceId),invoiceNumber:text(payload.invoiceNumber)});
+  const originalReference = text(payload.originalPaymentReference || payload.paymentReference);
+  let invoice = await resolveInvoice(pool,{invoiceId:text(payload.invoiceId),invoiceNumber:text(payload.invoiceNumber)});
+  if (!invoice && eventType === 'refund' && provider && originalReference) invoice = await resolveInvoiceFromPaymentReference(pool,`${provider}:${originalReference}`);
   if (!provider || !eventReference || !invoice || amountKzt == null || amountKzt <= 0) { json(res,400,{error:'INVALID_PROVIDER_EVENT'}); return true; }
   if (status !== 'succeeded' && status !== 'paid' && status !== 'refunded') { json(res,202,{accepted:true,applied:false,status}); return true; }
   try {
     if (eventType === 'refund') {
-      const originalReference = text(payload.originalPaymentReference || payload.paymentReference);
       if (!originalReference) { json(res,400,{error:'ORIGINAL_PAYMENT_REFERENCE_REQUIRED'}); return true; }
       const result = await recordRefund(pool,{
         provider,originalPaymentReference:`${provider}:${originalReference}`,refundReference:eventReference,amountKzt,invoiceId:invoice.id,
@@ -121,7 +134,9 @@ async function handleCloudPayments(req: IncomingMessage,res: ServerResponse,pool
   if (!secureHmac(raw,cloudSignature(req),secret)) { json(res,401,{code:13}); return true; }
   const params = Object.fromEntries(new URLSearchParams(raw).entries());
   const providerInvoiceId = text(params.InvoiceId);
-  const invoice = await resolveInvoice(pool,{invoiceId:providerInvoiceId,invoiceNumber:providerInvoiceId});
+  const originalTransactionId = text(params.PaymentTransactionId);
+  let invoice = await resolveInvoice(pool,{invoiceId:providerInvoiceId,invoiceNumber:providerInvoiceId});
+  if (!invoice && event === 'refund' && originalTransactionId) invoice = await resolveInvoiceFromPaymentReference(pool,`cloudpayments:${originalTransactionId}`);
   if (!invoice) { json(res,200,{code:10}); return true; }
   if (text(params.AccountId) && text(params.AccountId) !== text(invoice.external_key) && text(params.AccountId) !== text(invoice.organization_id)) { json(res,200,{code:10}); return true; }
   if (params.Currency && text(params.Currency).toUpperCase() !== String(invoice.currency || 'KZT').toUpperCase()) { json(res,200,{code:12}); return true; }
@@ -145,7 +160,6 @@ async function handleCloudPayments(req: IncomingMessage,res: ServerResponse,pool
   }
   if (event === 'refund') {
     const refundReference = text(params.TransactionId);
-    const originalTransactionId = text(params.PaymentTransactionId);
     const amount = number(params.Amount);
     if (!refundReference || !originalTransactionId || amount == null || amount <= 0) { json(res,200,{code:13}); return true; }
     try {
