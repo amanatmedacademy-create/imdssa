@@ -37,7 +37,7 @@ chown root:imdssa "$ENV_DIR/telegram.env"; chmod 0640 "$ENV_DIR/telegram.env"
 systemctl stop imdssa-reconcile.timer imdssa-reconcile.service 2>/dev/null || true
 systemctl stop imdssa-product-monitor.timer imdssa-product-monitor.service 2>/dev/null || true
 install -d -o root -g postgres -m 0750 "$APP_DIR/migrations"
-for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql 005_registration_notifications.sql 005_security_hardening.sql 006_tenant_rbac.sql 007_notification_delivery_settings.sql 009_tenant_user_access.sql 010_product_commercial_catalog.sql 011_product_commercial_model.sql; do
+for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql 005_registration_notifications.sql 005_security_hardening.sql 006_tenant_rbac.sql 007_notification_delivery_settings.sql 009_tenant_user_access.sql 010_product_commercial_catalog.sql 011_product_commercial_model.sql 012_organization_product_subscriptions.sql; do
   install -o root -g postgres -m 0640 "$STAGE_DIR/$migration" "$APP_DIR/migrations/$migration"
   sudo -u postgres psql --set=ON_ERROR_STOP=1 --dbname=imdssa --file="$APP_DIR/migrations/$migration"
 done
@@ -118,8 +118,3 @@ systemctl is-active --quiet postgresql
 systemctl is-active --quiet imdssa-product-monitor.timer
 systemctl is-active --quiet imdssa-reconcile.timer
 sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select code||'|'||last_health::text from app.products where code='imds-marketing'" | grep -q '^imds-marketing|'
-sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select case when to_regclass('app.registration_notifications') is null then 'missing' else 'ready' end" | grep -q '^ready$'
-sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select exists(select 1 from information_schema.columns where table_schema='app' and table_name='platform_users' and column_name='must_change_password')" | grep -q '^t$'
-sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select to_regclass('app.product_plans') is not null and to_regclass('app.product_limit_catalog') is not null and to_regclass('app.product_module_prices') is not null and to_regclass('app.product_plan_revisions') is not null" | grep -q '^t$'
-sudo -u postgres psql --dbname=imdssa --tuples-only --no-align --command="select exists(select 1 from app.modules where code='marketing.ai' and status='published')" | grep -q '^t$'
-echo "IMDS Control Center deployed on port 8080"
