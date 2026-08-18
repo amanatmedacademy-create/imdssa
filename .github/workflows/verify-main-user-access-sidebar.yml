@@ -1,0 +1,80 @@
+name: Verify Main Users Sidebar
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-main-user-access-sidebar.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: verify-main-users-sidebar
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate source
+        env:
+          VITE_RUNTIME: vps
+          VITE_APP_ENV: production
+          VITE_APP_VERSION: 0.8.0
+          VITE_RELEASE_SHA: ${{ github.sha }}
+          IMDS_STRICT_ENV: 'true'
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run lint --workspace @imds/vps-api
+          npm run build --workspace @imds/vps-api
+          npm run lint
+          npm run build
+          grep -q "data-user-access-nav" src/features/access/UserAccessOverlay.tsx
+          ! grep -q "access-fab" src/features/access/UserAccessOverlay.tsx
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Verify deployed release
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS
+          SSH_ARGS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20)
+          for _ in $(seq 1 120); do
+            deployed="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "basename \"\$(readlink -f /var/www/imds-super-admin/current)\"" 2>/dev/null || true)"
+            if [ "$deployed" = "$GITHUB_SHA" ]; then break; fi
+            sleep 5
+          done
+          deployed="$(sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" "basename \"\$(readlink -f /var/www/imds-super-admin/current)\"")"
+          test "$deployed" = "$GITHUB_SHA"
+          sshpass -e ssh "${SSH_ARGS[@]}" "$VPS_USER@$VPS_HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          test "$(systemctl is-active imds-super-admin-api.service)" = active
+          curl -fsS --max-time 10 http://127.0.0.1:8788/healthz >/dev/null
+          grep -R -q 'Пользователи' /var/www/imds-super-admin/current/assets
+          grep -R -q 'userAccessNav' /var/www/imds-super-admin/current/assets
+          ! grep -R -q 'access-fab' /var/www/imds-super-admin/current/assets
+          REMOTE
+      - name: Record verification
+        run: |
+          set -euo pipefail
+          git config user.name 'IMDS Automation'
+          git config user.email 'automation@imds.local'
+          git pull --rebase origin main
+          mkdir -p docs/internal
+          printf '{"verified":true,"scope":"users-sidebar-runtime","sourceSha":"%s","verifiedAt":"%s"}\n' "$GITHUB_SHA" "$(date -u +%FT%TZ)" > docs/internal/users-sidebar-runtime-verification.json
+          git add docs/internal/users-sidebar-runtime-verification.json
+          git commit -m 'record successful users sidebar verification'
+          git push origin HEAD:main
