@@ -42,7 +42,7 @@ systemctl stop imdssa-product-monitor.timer imdssa-product-monitor.service 2>/de
 systemctl stop imdssa-subscription-lifecycle.timer imdssa-subscription-lifecycle.service 2>/dev/null || true
 systemctl stop imdssa-billing-reconciliation.timer imdssa-billing-reconciliation.service 2>/dev/null || true
 install -d -o root -g postgres -m 0750 "$APP_DIR/migrations"
-for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql 005_registration_notifications.sql 005_security_hardening.sql 006_tenant_rbac.sql 007_notification_delivery_settings.sql 009_tenant_user_access.sql 010_product_commercial_catalog.sql 011_product_commercial_model.sql 012_organization_product_subscriptions.sql 014_billing_invoices_payments.sql 015_subscription_lifecycle.sql 016_paid_invoice_plan_application.sql 017_verified_provider_payments.sql 018_refunds_and_reconciliation.sql; do
+for migration in 002_auth_sessions.sql 003_platform_management.sql 004_control_plane_sync.sql 005_registration_notifications.sql 005_security_hardening.sql 006_tenant_rbac.sql 007_notification_delivery_settings.sql 009_tenant_user_access.sql 010_product_commercial_catalog.sql 011_product_commercial_model.sql 012_organization_product_subscriptions.sql 014_billing_invoices_payments.sql 015_subscription_lifecycle.sql 016_paid_invoice_plan_application.sql 017_verified_provider_payments.sql 018_refunds_and_reconciliation.sql 019_refund_aware_payment_engine.sql; do
   install -o root -g postgres -m 0640 "$STAGE_DIR/$migration" "$APP_DIR/migrations/$migration"
   sudo -u postgres psql --set=ON_ERROR_STOP=1 --dbname=imdssa --file="$APP_DIR/migrations/$migration"
 done
