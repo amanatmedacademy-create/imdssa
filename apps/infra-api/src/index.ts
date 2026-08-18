@@ -16,6 +16,7 @@ const pool = new Pool({ connectionString: databaseUrl, max: 5 });
 
 type User = { id: string; email: string; full_name: string; global_role: string | null; is_active: boolean };
 type ServiceSpec = { key: string; unit: string; label: string; mutable: boolean; kind: 'service' | 'timer' };
+type ListeningPort = { protocol: string; state: string; address: string; port: number; process: string | null; pid: number | null; exposure: 'public' | 'loopback' | 'private' | 'unknown' };
 const services: ServiceSpec[] = [
   { key: 'super-admin-api', unit: 'imds-super-admin-api.service', label: 'Super Admin API', mutable: true, kind: 'service' },
   { key: 'marketing', unit: 'imds-marketing.service', label: 'IMDS Marketing', mutable: true, kind: 'service' },
@@ -99,6 +100,45 @@ async function diskUsage() {
     const row = raw.split('\n').slice(-1)[0].trim().split(/\s+/);
     return { total: Number(row[0]) || 0, used: Number(row[1]) || 0, available: Number(row[2]) || 0, percent: Number(String(row[3] || '0').replace('%', '')) || 0 };
   } catch { return { total: 0, used: 0, available: 0, percent: 0 }; }
+}
+function endpoint(value: string): { address: string; port: number } | null {
+  const index = value.lastIndexOf(':');
+  if (index < 0) return null;
+  const portNumber = Number(value.slice(index + 1));
+  if (!Number.isFinite(portNumber) || portNumber < 1 || portNumber > 65535) return null;
+  const address = value.slice(0, index).replace(/^\[/, '').replace(/\]$/, '') || '*';
+  return { address, port: portNumber };
+}
+function portExposure(address: string): ListeningPort['exposure'] {
+  const normalized = address.split('%')[0].replace(/^\[/, '').replace(/\]$/, '');
+  if (normalized === '*' || normalized === '0.0.0.0' || normalized === '::') return 'public';
+  if (normalized === '::1' || normalized.startsWith('127.')) return 'loopback';
+  if (/^10\./.test(normalized) || /^192\.168\./.test(normalized) || /^172\.(1[6-9]|2\d|3[01])\./.test(normalized) || /^fe80:/i.test(normalized)) return 'private';
+  if (/^[0-9a-f:]+$/i.test(normalized) || /^\d{1,3}(\.\d{1,3}){3}$/.test(normalized)) return 'public';
+  return 'unknown';
+}
+async function listeningPorts(): Promise<ListeningPort[]> {
+  try {
+    const raw = await command('/usr/bin/ss', ['-H', '-lntup'], 10000);
+    const items = raw.split('\n').filter(Boolean).flatMap((line): ListeningPort[] => {
+      const columns = line.trim().split(/\s+/);
+      if (columns.length < 6) return [];
+      const local = endpoint(columns[4]);
+      if (!local) return [];
+      const processText = columns.slice(6).join(' ');
+      const processMatch = processText.match(/\(\("([^"]+)",pid=(\d+)/);
+      return [{
+        protocol: columns[0].toLowerCase(),
+        state: columns[1],
+        address: local.address,
+        port: local.port,
+        process: processMatch?.[1] || null,
+        pid: processMatch?.[2] ? Number(processMatch[2]) : null,
+        exposure: portExposure(local.address),
+      }];
+    });
+    return items.sort((a, b) => a.port - b.port || a.protocol.localeCompare(b.protocol) || a.address.localeCompare(b.address));
+  } catch { return []; }
 }
 async function serviceState(spec: ServiceSpec) {
   try {
@@ -185,11 +225,40 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   if (!canRead(user)) return json(res, 403, { error: 'PLATFORM_INFRASTRUCTURE_ACCESS_REQUIRED' });
 
   if (url.pathname === '/infra-api/overview' && method === 'GET') {
-    const [cpu, disk, db, serviceRows, deployments] = await Promise.all([
-      cpuPercent(), diskUsage(), pool.query(`select current_database() database,pg_database_size(current_database())::bigint database_bytes,(select count(*)::int from pg_stat_activity where datname=current_database()) connections,(select count(*)::int from pg_stat_activity where datname=current_database() and state='active') active_connections`), Promise.all(services.map(serviceState)), Promise.all([releaseInfo('Super Admin', '/var/www/imds-super-admin/current'), releaseInfo('Marketing', '/opt/imds-marketing/current')]),
+    const [cpu, disk, db, serviceRows, deployments, ports] = await Promise.all([
+      cpuPercent(),
+      diskUsage(),
+      pool.query(`select current_database() database,pg_database_size(current_database())::bigint database_bytes,(select count(*)::int from pg_stat_activity where datname=current_database()) connections,(select count(*)::int from pg_stat_activity where datname=current_database() and state='active') active_connections`),
+      Promise.all(services.map(serviceState)),
+      Promise.all([releaseInfo('Super Admin', '/var/www/imds-super-admin/current'), releaseInfo('Marketing', '/opt/imds-marketing/current')]),
+      listeningPorts(),
     ]);
-    const totalMemory = os.totalmem(); const freeMemory = os.freemem();
-    return json(res, 200, { host: { hostname: os.hostname(), platform: os.platform(), release: os.release(), uptimeSeconds: os.uptime(), cpuCores: os.cpus().length, cpuPercent: Number(cpu.toFixed(1)), loadAverage: os.loadavg(), memory: { total: totalMemory, used: totalMemory - freeMemory, free: freeMemory, percent: Number((((totalMemory - freeMemory) / totalMemory) * 100).toFixed(1)) }, disk }, database: db.rows[0], services: serviceRows, deployments, time: new Date().toISOString() });
+    const totalMemory = os.totalmem();
+    const freeMemory = os.freemem();
+    const cpuRows = os.cpus();
+    const cpuModel = cpuRows[0]?.model.trim() || 'unknown';
+    const cpuSpeedMHz = cpuRows.reduce((max, row) => Math.max(max, Number(row.speed) || 0), 0);
+    return json(res, 200, {
+      host: {
+        hostname: os.hostname(),
+        platform: os.platform(),
+        release: os.release(),
+        architecture: os.arch(),
+        uptimeSeconds: os.uptime(),
+        cpuModel,
+        cpuCores: cpuRows.length,
+        cpuSpeedMHz,
+        cpuPercent: Number(cpu.toFixed(1)),
+        loadAverage: os.loadavg(),
+        memory: { total: totalMemory, used: totalMemory - freeMemory, free: freeMemory, percent: Number((((totalMemory - freeMemory) / totalMemory) * 100).toFixed(1)) },
+        disk,
+      },
+      database: db.rows[0],
+      services: serviceRows,
+      deployments,
+      ports,
+      time: new Date().toISOString(),
+    });
   }
 
   if (url.pathname === '/infra-api/services' && method === 'GET') return json(res, 200, { items: await Promise.all(services.map(serviceState)) });
